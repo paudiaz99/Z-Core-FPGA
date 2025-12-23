@@ -36,7 +36,7 @@ This repository contains the FPGA implementation of the Z-Core v0.2.0-alpha RISC
 |-----------|-------|
 | Target FPGA | Intel MAX 10 (10M50DAF484C7G) |
 | Operating Frequency | 50 MHz |
-| Program Memory | 4 KB Block RAM (M9K) |
+| Program Memory | 4 KB Block RAM |
 | Peripherals | UART (9600 baud), GPIO |
 | Development Board | Terasic DE10-Lite |
 
