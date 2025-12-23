@@ -4,13 +4,15 @@
 
 The UART module provides serial communication accessible via the Z-Core processor. On the DE10-Lite board, the UART is connected through the onboard USB-Blaster for host PC communication.
 
+> **Note**: For detailed UART module implementation and RTL design, see the [Z-Core repository](https://github.com/paudiaz99/Z-Core).
+
+---
+
 <div align="center">
   <img src="https://github.com/user-attachments/assets/b5b30bf8-e1a6-4933-ab1f-c4492ec62d6e" alt="centered image">
   <br>
-  <sup>Uart Serial Communication with PC.</sup>
+  <sup>Uart Serial Communication with host PC.</sup>
 </div>
-
-> **Note**: For detailed UART module implementation and RTL design, see the [Z-Core repository](https://github.com/paudiaz99/Z-Core).
 
 ---
 
