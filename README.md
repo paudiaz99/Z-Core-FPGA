@@ -28,7 +28,7 @@
 
 ## Overview
 
-This repository contains the FPGA implementation of the Z-Core RISC-V RV32I processor, targeting the Intel DE10-Lite development board.
+This repository contains the FPGA implementation of the Z-Core v0.2.0-alpha RISC-V RV32I processor, targeting the Intel DE10-Lite development board.
 
 ### Key Specifications
 
