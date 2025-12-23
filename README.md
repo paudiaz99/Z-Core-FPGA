@@ -11,7 +11,7 @@
 
 <div align="center">
   
-**FPGA Implementation for DE10-Lite**
+**FPGA Implementation for DE10-Lite Board**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![FPGA](https://img.shields.io/badge/FPGA-MAX%2010-0071c5.svg)](https://www.altera.com/asap/offering/a1jui0000049upbmam/max-10-device-family-de10-lite-board)
