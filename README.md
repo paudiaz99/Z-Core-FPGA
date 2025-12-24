@@ -95,7 +95,7 @@ cd software
 | `0x0400_1000` - `0x0400_1FFF` | GPIO | 4 KB |
 
 > [!IMPORTANT]
-> **Memory Limitation**: The system uses **4 KB** of on-chip Block RAM (M9K) for program memory, not the external SDRAM (64 MB). Programs must fit within this limit. Increase `ADDR_WIDTH` in `axil_ram` instantiation for larger memory.
+> **Memory Limitation**: The system uses **4 KB** of on-chip Block RAM for program memory, not the external SDRAM (64 MB). Programs must fit within this limit. Increase `ADDR_WIDTH` in `axil_ram` instantiation for larger memory.
 The capability of using the 64MB SDRAM will be added in the future.
 
 ---
@@ -124,6 +124,7 @@ The capability of using the 64MB SDRAM will be added in the future.
 │   ├── start.S                # RISC-V Startup code
 │   ├── linker.ld              # Linker script
 │   ├── Makefile               # GNU Make build system
+│   ├── hex_gen.ps1            # Compiler and HEX generation script
 │   └── elf2hex.py             # HEX generation utility
 │
 ├── doc/                        # Documentation

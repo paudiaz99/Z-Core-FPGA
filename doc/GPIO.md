@@ -12,31 +12,32 @@ The GPIO module provides bidirectional General Purpose Input/Output pins accessi
 
 | GPIO Pins | DE10-Lite Component | Direction |
 |-----------|---------------------|-----------|
-| `GPIO[9:0]` | `LEDR[9:0]` (Red LEDs) | Output |
-| `GPIO[19:10]` | `SW[9:0]` (Switches) | Input |
+| `GPIO[7:0]` | `GPIO[7:0]` | Output |
 
-### LED Control
+You can also configure the GPIOs to control the LEDs and switches on the DE10-Lite board.
 
-The 10 red LEDs on the DE10-Lite are directly controlled by writing to the GPIO data register:
+### [7:0] LED Control
+
+The LEDs on the DE10-Lite are directly controlled by writing to the GPIO data register:
 
 ```c
 // Turn on LED 0
 *(volatile uint32_t*)0x04001000 = 0x00000001;
 
 // Turn on all LEDs
-*(volatile uint32_t*)0x04001000 = 0x000003FF;
+*(volatile uint32_t*)0x04001000 = 0x000000FF;
 
 // Turn off all LEDs
 *(volatile uint32_t*)0x04001000 = 0x00000000;
 ```
 
-### Switch Reading
+### [7:0] Switch Reading
 
-The 10 slide switches can be read from the GPIO data register:
+The switches on the DE10-Lite can be read from the GPIO data register:
 
 ```c
-// Read switch states (bits 19:10)
-uint32_t switches = (*(volatile uint32_t*)0x04001000 >> 10) & 0x3FF;
+// Read switch states (bits 15:8)
+uint32_t switches = (*(volatile uint32_t*)0x04001000 >> 8) & 0xFF;
 ```
 
 ---
@@ -81,8 +82,8 @@ uint32_t switches = (*(volatile uint32_t*)0x04001000 >> 10) & 0x3FF;
 #define GPIO_DIR  (*(volatile uint32_t*)0x04001008)
 
 void main() {
-    // Configure GPIO[9:0] as outputs
-    GPIO_DIR = 0x000003FF;
+    // Configure GPIO[7:0] as outputs
+    GPIO_DIR = 0x000000FF;
     
     while (1) {
         GPIO_DATA = 0x00000055;  // Alternating pattern
@@ -98,31 +99,12 @@ void main() {
 ```c
 void main() {
     // Configure LEDs as output, switches as input
-    GPIO_DIR = 0x000003FF;  // Bits 9:0 = output
+    GPIO_DIR = 0x000000FF;  // Bits 7:0 = output, 15:8 = input
     
     while (1) {
-        // Read switches and mirror to LEDs
-        uint32_t sw = (GPIO_DATA >> 10) & 0x3FF;
+        // Read switches (15:8) and mirror to LEDs (7:0)
+        uint32_t sw = (GPIO_DATA >> 8) & 0xFF; 
         GPIO_DATA = sw;
     }
 }
 ```
-
----
-
-## Pin Assignment (Quartus)
-
-The DE10-Lite pin assignments for GPIO are configured in the Quartus project:
-
-| Signal | FPGA Pin | Description |
-|--------|----------|-------------|
-| `LEDR[0]` | PIN_A8 | Red LED 0 |
-| `LEDR[1]` | PIN_A9 | Red LED 1 |
-| ... | ... | ... |
-| `LEDR[9]` | PIN_B11 | Red LED 9 |
-| `SW[0]` | PIN_C10 | Slide Switch 0 |
-| `SW[1]` | PIN_C11 | Slide Switch 1 |
-| ... | ... | ... |
-| `SW[9]` | PIN_B14 | Slide Switch 9 |
-
-See `Z-Core.qsf` for complete pin assignments.

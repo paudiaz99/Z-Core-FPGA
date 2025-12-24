@@ -29,16 +29,16 @@ The Z-Core is a pipelined RISC-V RV32I processor designed for educational purpos
 │                         Z-Core Top Module                       │
 │                                                                 │
 │  ┌──────────────┐     ┌───────────────────┐                     │
-│  │   Z-Core     │     │  AXI-Lite         │                     │
-│  │  Control Unit│────>│  Interconnect     │                     │
-│  │   (RV32I)    │     │                   │                     │
+│  │    Z-Core    │     │      AXI-Lite     │                     │
+│  │    (RV32I)   │────>│    Interconnect   │                     │
+│  │              │     │                   │                     │
 │  └──────────────┘     └───────┬───────────┘                     │
 │                               │                                 │
 │            ┌──────────────────┼──────────────────┐              │
 │            ▼                  ▼                  ▼              │
 │    ┌──────────────┐   ┌──────────────┐   ┌──────────────┐       │
 │    │   Block RAM  │   │     UART     │   │     GPIO     │       │
-│    │   (4 KB)     │   │  (115200 bd) │   │  (64 pins)   │       │
+│    │   (4 KB)     │   │  (9600 baud) │   │  (64 pins)   │       │
 │    └──────────────┘   └──────────────┘   └──────────────┘       │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
@@ -53,7 +53,7 @@ The Z-Core is a pipelined RISC-V RV32I processor designed for educational purpos
 | `0x0400_1000 - 0x0400_1FFF`| 4 KB   | GPIO       | General-purpose I/O               |
 
 > [!IMPORTANT]
-> **Current Memory Limitation**: The system currently uses **4 KB (4096 bytes)** of on-chip block RAM for program memory. This is *not* the FPGA's external SDRAM (64 MB) but rather synthesized from the MAX 10's internal M9K memory blocks (approximately 189 KB total available on DE10-Lite). The block RAM is configured with `ADDR_WIDTH=12` bits, yielding 2^10 = 1024 addressable 32-bit words.
+> **Current Memory Limitation**: The system currently uses **4 KB (4096 bytes)** of on-chip block RAM for program memory. This is *not* the FPGA's external SDRAM (64 MB). The block RAM is configured with `ADDR_WIDTH=12` bits, yielding 2^10 = 1024 addressable 32-bit words.
 
 ### Clocking
 
@@ -219,40 +219,35 @@ SECTIONS
 | `.data`   | Initialized global/static variables   | Yes         | Yes           |
 | `.bss`    | Uninitialized global/static variables | No (zeroed) | No            |
 
-### How Code and Data Are Separated (Avoiding Overwrites)
-
-A common question is: *How does the program know where to store data without overwriting instructions?*
-
-The answer lies in the linker's **sequential section placement** and the **location counter**.
 
 #### Runtime Memory Layout
 
 ```
 ┌─────────────────────────────────────┐  0x00000000 (Reset Vector)
-│           .text                     │  ← Machine code (instructions)
+│               .text                 │  ← Machine code (instructions)
 │      (executable code)              │     Placed FIRST by linker
 │                                     │
 ├─────────────────────────────────────┤  (end of .text)
-│           .rodata                   │  ← Read-only data
+│               .rodata               │  ← Read-only data
 │  (constant strings, lookup tables)  │     Merged into .text section
 │                                     │
 ├─────────────────────────────────────┤  (end of .rodata)
-│           .data                     │  ← Initialized global variables
-│    (pre-initialized globals)        │     Placed AFTER code
+│               .data                 │  ← Initialized global variables
+│     (pre-initialized globals)       │     Placed AFTER code
 │                                     │
 ├─────────────────────────────────────┤  (end of .data)
-│           .bss                      │  ← Uninitialized globals
+│               .bss                  │  ← Uninitialized globals
 │   (zero-initialized at startup)     │     Placed AFTER .data
 │                                     │
 ├─────────────────────────────────────┤  _end symbol
 │                                     │
-│        (Free Memory)                │  ← Available for heap
+│           (Free Memory)             │  ← Available for heap
 │                                     │     (if dynamic allocation used)
 │                                     │
 ├─────────────────────────────────────┤
-│             ↓ ↓ ↓                   │
-│           Stack                     │  ← Stack grows DOWNWARD
-│             ↓ ↓ ↓                   │     from _stack_top
+│                                     │
+│               Stack                 │  ← Stack grows DOWNWARD
+│                                     │     from _stack_top
 │                                     │
 └─────────────────────────────────────┘  _stack_top (e.g., 0x00001000)
 ```
@@ -280,13 +275,6 @@ The linker uses a **location counter** (`.`) to track the current memory address
 
 _end = .;                 // Symbol marks end of used memory
 ```
-
-#### Why Collisions Cannot Happen
-
-1. **Compile-Time Sizing**: The compiler knows the exact size of each section before the linker runs
-2. **Sequential Placement**: Sections are placed one after another with no gaps or overlaps
-3. **Absolute Addressing**: All addresses are resolved at link time — the CPU executes from fixed addresses
-4. **Stack Separation**: Stack starts at a high address and grows toward lower addresses
 
 #### Example: Section Layout for `hello.elf`
 
@@ -317,7 +305,7 @@ The stack and static data occupy **opposite ends** of memory:
                     Code/Data grow UP (during linking)
                               ↑
 ┌────────────────────────────────────────────────────────┐
-│  .text  │  .data  │  .bss  │ ← _end    FREE    stack  │
+│  .text  │  .data  │  .bss  │ ← _end    FREE    stack   │
 └────────────────────────────────────────────────────────┘
 0x000                                              _stack_top
                                                         ↓
@@ -556,7 +544,6 @@ $ riscv64-unknown-elf-size hello.elf
    ```
 
 3. **Open Quartus Project**
-   - Open `Z-Core.qpf` in Quartus Prime
 
 4. **Set Memory Initialization (if needed)**
    - Edit `z_core_top_model.v` parameter:
@@ -572,7 +559,7 @@ $ riscv64-unknown-elf-size hello.elf
    - Processing → Start → Fitter
 
 7. **Run Timing Analysis**
-   - Verify all timing constraints are met (no red paths)
+   - Verify all timing constraints are met (no negative slack)
 
 8. **Program FPGA**
    - Tools → Programmer
@@ -628,7 +615,8 @@ $ riscv64-unknown-elf-size hello.elf
    ```
 
 4. **Simulate in ModelSim**
-   Use `top_module_tb.v` with the HEX file for pre-synthesis verification.
+   
+   Create a testbench `top_module_tb.v` with the HEX file for pre-synthesis verification.
 
 ---
 
@@ -641,55 +629,10 @@ $ riscv64-unknown-elf-size hello.elf
 
 ### GNU Toolchain
 
-- [GNU Linker Manual](https://sourceware.org/binutils/docs/ld/)
+- [RISC-V GNU Toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain)
 - [GCC RISC-V Options](https://gcc.gnu.org/onlinedocs/gcc/RISC-V-Options.html)
 
 ### Intel FPGA
 
-- [DE10-Lite User Manual](https://www.terasic.com.tw/cgi-bin/page/archive.pl?Language=English&CategoryNo=218&No=1021&PartNo=4)
-- [MAX 10 FPGA Device Handbook](https://www.intel.com/content/www/us/en/programmable/documentation/sam1393999966669.html)
-
----
-
-## Appendix: Quick Reference
-
-### Memory Sizes
-
-| Parameter            | Value     | Calculation                              |
-|----------------------|-----------|------------------------------------------|
-| Block RAM ADDR_WIDTH | 12 bits   | Configured in `axil_ram` instantiation   |
-| Word Address Bits    | 10 bits   | `ADDR_WIDTH - log2(4)` = 12 - 2          |
-| Total Words          | 1024      | 2^10                                     |
-| Total Bytes          | 4096 (4 KB)| 1024 × 4 bytes                          |
-
-### Build Commands Summary
-
-```bash
-# Quick build (PowerShell)
-./hex_gen.ps1 -Target myprogram
-
-# Full build with Makefile
-make
-
-# Manual complete build
-riscv64-unknown-elf-gcc -march=rv32i -mabi=ilp32 -c start.S -o start.o
-riscv64-unknown-elf-gcc -march=rv32i -mabi=ilp32 -O2 -ffreestanding -nostdlib -c myprogram.c -o myprogram.o
-riscv64-unknown-elf-ld -T linker.ld myprogram.o start.o -o myprogram.elf
-python elf2hex.py myprogram.elf myprogram.hex
-```
-
-### File Structure
-
-```
-software/
-├── start.S         # Startup code (entry point, BSS clear, stack init)
-├── linker.ld       # Linker script (memory layout)
-├── elf2hex.py      # ELF to Verilog HEX converter
-├── hex_gen.ps1     # PowerShell build script
-├── Makefile        # GNU Make build system
-├── hello.c         # Example program
-├── hello.elf       # Compiled executable
-├── hello.hex       # Memory initialization file
-├── hello.lst       # Disassembly listing
-└── hello.map       # Linker memory map
-```
+- [DE10-Lite User Manual](https://ftp.intel.com/Public/Pub/fpgaup/pub/Intel_Material/Boards/DE10-Lite/DE10_Lite_User_Manual.pdf)
+- [MAX 10 FPGA Device Handbook](https://www.intel.com/programmable/technical-pdfs/max10-handbook.pdf)
