@@ -22,7 +22,23 @@
 
 ---
 
-> **Note**: For Z-Core processor architecture, pipeline implementation, verification methodology, and ISA compliance documentation, refer to the main **[Z-Core repository](https://github.com/paudiaz99/Z-Core)**.
+## Block Diagram
+
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/fec3a0e0-5cef-46e4-a3fd-7f07b1387a11" alt="centered image">
+  <br>
+  <sup>Z-Core SoC Architecture.</sup>
+</div>
+
+## Z-Core RV32IM Architecture
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/c02b2a54-ae7c-4070-adcd-875faa8720d2" alt="centered image">
+  <br>
+  <sup>Z-Core RV32IM Architecture Diagram.</sup>
+</div>
+
+
+> **Note**: For Z-Core detailed processor architecture explanation, pipeline implementation, verification methodology, and ISA compliance documentation, refer to the main **[Z-Core repository](https://github.com/paudiaz99/Z-Core)**.
 
 ---
 
@@ -92,7 +108,7 @@ The software is located in the `software/` directory. It contains multiple examp
 
 ### Examples
 
-- `hello`: A simple "Hello, World!" program. Sends Messages via UART.
+- `hello`: A simple "Hello, World!" program. Sends messages via UART.
 - `led_test`: A program that blinks the LEDs on the DE10-Lite board.
 - `gpio_test`: A program that tests the GPIO functionality of the Z-Core processor.
 - `game_test`: A program that implements a simple Pong game through UART (Isn't it fun? :D).
@@ -145,10 +161,10 @@ The capability of using the 64MB SDRAM will be added in the future.
 │   ├── z_core_alu_ctrl.v      # ALU Control Unit
 │   ├── z_core_decoder.v       # Instruction Decoder
 │   ├── z_core_reg_file.v      # General Purpose Registers
-│   ├── z_core_mult_unit.v      # General Purpose Registers
-│   ├── z_core_mult_tree.v      # General Purpose Registers
-│   ├── z_core_mult_synth.v      # General Purpose Registers
-│   ├── z_core_div_unit.v      # General Purpose Registers
+│   ├── z_core_mult_unit.v     # Multiplication Unit
+│   ├── z_core_mult_tree.v     # Wallace Tree Multiplier
+│   ├── z_core_mult_synth.v    # Synthesizable Multiplier Wrapper
+│   ├── z_core_div_unit.v      # Division Unit
 │   ├── axil_interconnect.v    # AXI-Lite Bus Interconnect
 │   ├── axil_master.v          # AXI-Lite Master Interface
 │   ├── priority_encoder.v     # Priority Encoder
