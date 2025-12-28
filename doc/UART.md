@@ -80,64 +80,72 @@ BAUD_DIV = 50000000 / (16 * 9600) ≈ 27
 
 ---
 
-## Usage Examples
+## UART Library (`software/libs/uart.c`)
 
-### Transmit a Character
+The UART library provides reusable functions for serial communication. Include `uart.h` and link against `uart.c` in your projects.
 
-```c
-#include <stdint.h>
+### `uart_putc`
 
-#define UART_TX     (*(volatile uint32_t*)0x04000000)
-#define UART_STATUS (*(volatile uint32_t*)0x04000008)
-
-void uart_putc(char c) {
-    // Wait for TX buffer empty
-    while (!(UART_STATUS & 0x1));
-    
-    // Transmit character
-    UART_TX = c;
-}
-```
-
-### Transmit a String
+Transmits a single character over UART.
 
 ```c
-void uart_puts(const char* str) {
-    while (*str) {
-        uart_putc(*str++);
-    }
-}
-
-void main() {
-    uart_puts("Hello from Z-Core on DE10-Lite!\r\n");
-}
+void uart_putc(char c);
 ```
 
-### Receive a Character
+- **Parameters**: `c` — Character to transmit
+- **Behavior**: Writes the character to `UART_TX` and blocks until the TX buffer is empty (`tx_empty` flag in status register)
+
+---
+
+### `uart_puts`
+
+Transmits a null-terminated string over UART.
 
 ```c
-#define UART_RX (*(volatile uint32_t*)0x04000004)
-
-char uart_getc() {
-    // Wait for RX data available
-    while (!(UART_STATUS & 0x4));
-    
-    return UART_RX & 0xFF;
-}
+void uart_puts(const char *s);
 ```
 
-### Echo Program
+- **Parameters**: `s` — Pointer to null-terminated string
+- **Behavior**: Iterates through each character and calls `uart_putc()` for transmission
+
+---
+
+### `uart_getc`
+
+Receives a single character from UART.
 
 ```c
-void main() {
-    uart_puts("UART Echo - Type characters:\r\n");
-    
-    while (1) {
-        char c = uart_getc();
-        uart_putc(c);  // Echo back
-    }
-}
+char uart_getc(void);
 ```
+
+- **Returns**: The received character (lower 8 bits of `UART_RX`)
+- **Note**: This is a non-blocking read; check `RX_VALID` status flag before calling if blocking behavior is needed
+
+---
+
+### `uart_puthex`
+
+Prints an unsigned 32-bit integer in hexadecimal format with `0x` prefix.
+
+```c
+void uart_puthex(unsigned int val);
+```
+
+- **Parameters**: `val` — 32-bit unsigned integer to print
+- **Output**: Prints `0x` followed by 8 uppercase hex digits (e.g., `0x0000ABCD`)
+
+---
+
+### `uart_putint`
+
+Prints a signed integer in decimal format.
+
+```c
+void uart_putint(int val);
+```
+
+- **Parameters**: `val` — Signed 32-bit integer to print
+- **Behavior**: Handles negative numbers by printing a leading `-` sign; prints `0` for zero values
 
 ---
 

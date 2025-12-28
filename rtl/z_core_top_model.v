@@ -37,7 +37,7 @@ module z_core_top #(
     parameter MEM_ADDR_WIDTH = 12,      // 4KB memory
     parameter N_GPIO = 64,
     parameter PIPELINE_OUTPUT = 0,
-    parameter INIT_FILE = "software/hello.hex"
+    parameter INIT_FILE = "software/game_test.hex"
 )(
     input wire MAX10_CLK1_50,
     //input wire rstn,

@@ -1,6 +1,6 @@
 # Z-Core FPGA Deployment Guide
 
-A comprehensive guide for compiling, linking, and deploying RV32I software on the Z-Core processor implemented on the DE10-Lite FPGA development board.
+A comprehensive guide for compiling, linking, and deploying RV32IM software on the Z-Core processor implemented on the DE10-Lite FPGA development board.
 
 ---
 
@@ -20,7 +20,7 @@ A comprehensive guide for compiling, linking, and deploying RV32I software on th
 
 ## System Overview
 
-The Z-Core is a pipelined RISC-V RV32I processor designed for educational purposes and FPGA deployment. It features an AXI-Lite bus interface connecting the CPU to memory and peripherals.
+The Z-Core is a pipelined RISC-V RV32IM processor designed for educational purposes and FPGA deployment. It features an AXI-Lite bus interface connecting the CPU to memory and peripherals.
 
 ### Hardware Architecture
 
@@ -30,7 +30,7 @@ The Z-Core is a pipelined RISC-V RV32I processor designed for educational purpos
 │                                                                 │
 │  ┌──────────────┐     ┌───────────────────┐                     │
 │  │    Z-Core    │     │      AXI-Lite     │                     │
-│  │    (RV32I)   │────>│    Interconnect   │                     │
+│  │    (RV32IM)  │────>│    Interconnect   │                     │
 │  │              │     │                   │                     │
 │  └──────────────┘     └───────┬───────────┘                     │
 │                               │                                 │
@@ -88,18 +88,18 @@ Before deploying code to Z-Core, ensure the following are installed and accessib
 
 | Tool                     | Purpose                                | Installation                              |
 |--------------------------|----------------------------------------|-------------------------------------------|
-| **RISC-V GNU Toolchain** | Cross-compilation for RV32I            | [riscv-gnu-toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain) |
+| **RISC-V GNU Toolchain** | Cross-compilation for RV32IM           | [riscv-gnu-toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain) |
 | **Python 3.x**           | ELF-to-HEX conversion script           | [python.org](https://www.python.org/)     |
 | **Intel Quartus Prime**  | FPGA synthesis and programming         | [Intel FPGA](https://www.intel.com/fpga)  |
 | **PowerShell** or **Bash** | Build script execution               | Pre-installed on Windows/Linux            |
 
 ### RISC-V Toolchain Configuration
 
-The toolchain must be built for the **RV32I** base integer instruction set:
+The toolchain must be built for the **RV32IM** integer instruction set with multiply/divide extension:
 
 ```bash
-# Example build configuration for rv32i
-./configure --prefix=/opt/riscv --with-arch=rv32i --with-abi=ilp32
+# Example build configuration for rv32im
+./configure --prefix=/opt/riscv --with-arch=rv32im --with-abi=ilp32
 make
 ```
 
@@ -111,7 +111,7 @@ riscv64-unknown-elf-objcopy --version
 ```
 
 > [!NOTE]
-> Despite the `riscv64` prefix, the toolchain supports 32-bit targets when using `-march=rv32i -mabi=ilp32` flags.
+> Despite the `riscv64` prefix, the toolchain supports 32-bit targets when using `-march=rv32im -mabi=ilp32` flags.
 
 ---
 
@@ -464,10 +464,10 @@ axil_ram #(
 cd software
 
 # 2. Assemble startup code
-riscv64-unknown-elf-gcc -march=rv32i -mabi=ilp32 -c start.S -o start.o
+riscv64-unknown-elf-gcc -march=rv32im -mabi=ilp32 -c start.S -o start.o
 
 # 3. Compile C source
-riscv64-unknown-elf-gcc -march=rv32i -mabi=ilp32 -O2 \
+riscv64-unknown-elf-gcc -march=rv32im -mabi=ilp32 -O2 \
     -ffreestanding -nostdlib -c hello.c -o hello.o
 
 # 4. Link into ELF executable
@@ -483,11 +483,11 @@ python elf2hex.py hello.elf hello.hex
 riscv64-unknown-elf-size hello.elf
 ```
 
-### Using the Build Script (PowerShell)
+### Using the Build Script (Bash)
 
-```powershell
+```bash
 cd software
-./hex_gen.ps1 -Target hello
+./hex_gen.sh -Target hello
 ```
 
 ### Using the Makefile
@@ -533,13 +533,13 @@ $ riscv64-unknown-elf-size hello.elf
 ### Step-by-Step Deployment
 
 1. **Compile Software**
-   ```powershell
+   ```bash
    cd software
-   ./hex_gen.ps1 -Target hello
+   ./hex_gen.sh -Target hello
    ```
 
 2. **Verify HEX File Exists**
-   ```powershell
+   ```bash
    ls software/*.hex
    ```
 

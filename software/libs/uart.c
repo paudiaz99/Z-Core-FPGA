@@ -22,35 +22,54 @@ SOFTWARE.
 
 */
 
-// ================================================================
-// Simple GPIO Test - Minimal code to verify GPIO writes
-// ================================================================
+#include "uart.h"
 
-#define GPIO_BASE 0x04001000
-#define GPIO_DATA (*((volatile unsigned int *)(GPIO_BASE + 0x00)))
-#define GPIO_DIR (*((volatile unsigned int *)(GPIO_BASE + 0x08)))
+void uart_putc(char c) {
+  UART_TX = (unsigned int)c;
+  // Wait for transmission to complete (tx_empty = bit 0)
+  while (!(UART_STAT & 0x01))
+    ; // Wait until tx_empty is 1
+}
 
-void delay(unsigned int count) {
-  for (volatile unsigned int i = 0; i < count; i++) {
-    asm volatile("nop");
+void uart_puts(const char *s) {
+  while (*s) {
+    uart_putc(*s++);
   }
 }
 
-int main(void) {
-  unsigned int counter = 0;
+char uart_getc(void) { return (char)(UART_RX & 0xFF); }
 
-  // Configure GPIO: all pins as outputs
-  GPIO_DIR = 0xFF;
+void uart_puthex(unsigned int val) {
+  const char hex[] = "0123456789ABCDEF";
+  uart_puts("0x");
+  for (int i = 28; i >= 0; i -= 4) {
+    uart_putc(hex[(val >> i) & 0xF]);
+  }
+}
 
-  // Simple loop - just toggle GPIOs
-  while (1) {
-    GPIO_DATA = counter & 0xFF;
+void uart_putint(int val) {
+  char buf[12];
+  int i = 0;
+  int neg = 0;
 
-    // Short delay (1000 iterations = ~3000 cycles)
-    delay(1000);
-
-    counter++;
+  if (val < 0) {
+    neg = 1;
+    val = -val;
   }
 
-  return 0;
+  if (val == 0) {
+    uart_putc('0');
+    return;
+  }
+
+  while (val > 0) {
+    buf[i++] = '0' + (val % 10);
+    val = val / 10;
+  }
+
+  if (neg)
+    uart_putc('-');
+  while (i > 0) {
+    uart_putc(buf[--i]);
+  }
 }

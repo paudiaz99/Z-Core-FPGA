@@ -22,35 +22,18 @@ SOFTWARE.
 
 */
 
-// ================================================================
-// Simple GPIO Test - Minimal code to verify GPIO writes
-// ================================================================
+#ifndef UART_H
+#define UART_H
 
-#define GPIO_BASE 0x04001000
-#define GPIO_DATA (*((volatile unsigned int *)(GPIO_BASE + 0x00)))
-#define GPIO_DIR (*((volatile unsigned int *)(GPIO_BASE + 0x08)))
+#define UART_BASE 0x04000000
+#define UART_TX (*((volatile unsigned int *)(UART_BASE + 0x00)))
+#define UART_RX (*((volatile unsigned int *)(UART_BASE + 0x04)))
+#define UART_STAT (*((volatile unsigned int *)(UART_BASE + 0x08)))
 
-void delay(unsigned int count) {
-  for (volatile unsigned int i = 0; i < count; i++) {
-    asm volatile("nop");
-  }
-}
+void uart_putc(char c);
+void uart_puts(const char *s);
+char uart_getc(void);
+void uart_puthex(unsigned int val);
+void uart_putint(int val);
 
-int main(void) {
-  unsigned int counter = 0;
-
-  // Configure GPIO: all pins as outputs
-  GPIO_DIR = 0xFF;
-
-  // Simple loop - just toggle GPIOs
-  while (1) {
-    GPIO_DATA = counter & 0xFF;
-
-    // Short delay (1000 iterations = ~3000 cycles)
-    delay(1000);
-
-    counter++;
-  }
-
-  return 0;
-}
+#endif // UART_H

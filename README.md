@@ -11,7 +11,7 @@
 
 <div align="center">
   
-**FPGA Implementation for DE10-Lite Board**
+**Z-Core FPGA Implementation for DE10-Lite Board**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![FPGA](https://img.shields.io/badge/FPGA-MAX%2010-0071c5.svg)](https://www.altera.com/asap/offering/a1jui0000049upbmam/max-10-device-family-de10-lite-board)
@@ -28,7 +28,7 @@
 
 ## Overview
 
-This repository contains the FPGA implementation of the Z-Core v0.2.0-alpha RISC-V RV32I processor, targeting the Intel DE10-Lite development board.
+This repository contains the FPGA implementation of the Z-Core v0.2.0-alpha RISC-V RV32IM processor, targeting the Intel DE10-Lite development board.
 
 ### Key Specifications
 
@@ -47,7 +47,7 @@ This repository contains the FPGA implementation of the Z-Core v0.2.0-alpha RISC
 | Tool | Purpose |
 |------|---------|
 | Intel Quartus Prime Lite | FPGA synthesis and programming |
-| RISC-V GNU Toolchain | Cross-compilation (rv32i target) |
+| RISC-V GNU Toolchain | Cross-compilation (rv32im target) |
 | Python 3.x | ELF-to-HEX conversion |
 
 ---
@@ -56,9 +56,9 @@ This repository contains the FPGA implementation of the Z-Core v0.2.0-alpha RISC
 
 ### 1. Compile Software
 
-```powershell
+```bash
 cd software
-./hex_gen.ps1 -Target hello
+./hex_gen.sh -Target hello
 ```
 
 ### 2. Synthesize FPGA Design
@@ -86,6 +86,41 @@ cd software
 
 ---
 
+## Software
+
+The software is located in the `software/` directory. It contains multiple examples that can be compiled and run on the Z-Core processor. These are compiled using the RISC-V GNU Toolchain and the Makefile provided in the directory.
+
+### Examples
+
+- `hello`: A simple "Hello, World!" program. Sends Messages via UART.
+- `led_test`: A program that blinks the LEDs on the DE10-Lite board.
+- `gpio_test`: A program that tests the GPIO functionality of the Z-Core processor.
+- `game_test`: A program that implements a simple Pong game through UART (Isn't it fun? :D).
+- `multiplication`: A program that implements a test for the RV32IM instruction set and sends the results via UART. 
+
+### Pong Game Setup
+
+The Pong game is a simple implementation of the classic Pong game. It uses the UART to display the game and the GPIO to control the paddles. Currently the only controllable paddle is Player 1 (the one on the left). Feel free to add Player 2 control via the GPIO.
+
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/b50e7727-6a6f-46b3-bfb0-b8266959b0bc" alt="centered image">
+  <br>
+  <sup>Pong Game via UART.</sup>
+</div>
+
+The Game will also display the score on the LEDs connected to GPIOs [7:0].
+
+**Input GPIO Connection**
+
+| GPIO | Function |
+|------|----------|
+| 8    | Paddle 1 Up |
+| 9    | Paddle 1 Down |
+
+>**Note** : You will need two push buttons and two pull down resistors to control the paddles. Connect the buttons to the GPIO and the pull down resistors to GND.
+
+---
+
 ## Memory Map
 
 | Address Range | Peripheral | Size |
@@ -110,6 +145,10 @@ The capability of using the 64MB SDRAM will be added in the future.
 │   ├── z_core_alu_ctrl.v      # ALU Control Unit
 │   ├── z_core_decoder.v       # Instruction Decoder
 │   ├── z_core_reg_file.v      # General Purpose Registers
+│   ├── z_core_mult_unit.v      # General Purpose Registers
+│   ├── z_core_mult_tree.v      # General Purpose Registers
+│   ├── z_core_mult_synth.v      # General Purpose Registers
+│   ├── z_core_div_unit.v      # General Purpose Registers
 │   ├── axil_interconnect.v    # AXI-Lite Bus Interconnect
 │   ├── axil_master.v          # AXI-Lite Master Interface
 │   ├── priority_encoder.v     # Priority Encoder
@@ -119,12 +158,18 @@ The capability of using the 64MB SDRAM will be added in the future.
 │   └── arbiter.v              # Bus Arbiter logic
 │
 ├── software/                   # Example programs and tools
+│   ├── libs/                  # Libraries
+│   │    ├── uart.c                # UART Library (.c file)
+│   │    └── uart.h                # UART Library (.h file)
 │   ├── hello.c                # Main example application
 │   ├── led_test.c             # LED peripheral test
+│   ├── gpio_test.c            # GPIO peripheral test
+│   ├── game_test.c            # Pong Game test
+│   ├── multiplication.c       # Multiplication test
 │   ├── start.S                # RISC-V Startup code
 │   ├── linker.ld              # Linker script
 │   ├── Makefile               # GNU Make build system
-│   ├── hex_gen.ps1            # Compiler and HEX generation script
+│   ├── hex_gen.sh             # Compiler and HEX generation script
 │   └── elf2hex.py             # HEX generation utility
 │
 ├── doc/                        # Documentation
