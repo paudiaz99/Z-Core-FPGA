@@ -26,7 +26,7 @@ module z_core_alu (
     input [31:0] alu_in1,
     input [31:0] alu_in2,
     input [3:0] alu_inst_type,
-    output reg [31:0] alu_out,
+    output [31:0] alu_out,
     output reg alu_branch
 );
 
