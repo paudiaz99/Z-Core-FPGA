@@ -31,7 +31,7 @@ The LEDs on the DE10-Lite are directly controlled by writing to the GPIO data re
 *(volatile uint32_t*)0x04001000 = 0x00000000;
 ```
 
-### [7:0] Switch Reading
+### [15:8] Switch Reading
 
 The switches on the DE10-Lite can be read from the GPIO data register:
 

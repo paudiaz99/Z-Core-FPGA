@@ -1,11 +1,11 @@
 <div align="center">
 <pre>
-███████╗       ██████╗ ██████╗ ██████╗ ███████╗
-╚══███╔╝      ██╔════╝██╔═══██╗██╔══██╗██╔════╝
-  ███╔╝ █████╗██║     ██║   ██║██████╔╝█████╗  
- ███╔╝  ╚════╝██║     ██║   ██║██╔══██╗██╔══╝  
-███████╗      ╚██████╗╚██████╔╝██║  ██║███████╗
-╚══════╝       ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝
+███████╗       ██████╗ ██████╗ ██████╗ ███████╗                            
+╚══███╔╝      ██╔════╝██╔═══██╗██╔══██╗██╔════╝                            
+  ███╔╝ █████╗██║     ██║   ██║██████╔╝█████╗     ___  ___   ___    _      
+ ███╔╝  ╚════╝██║     ██║   ██║██╔══██╗██╔══╝    | __|| _ \ / __|  /_\     
+███████╗      ╚██████╗╚██████╔╝██║  ██║███████╗  | _| |  _/| (_ | / _ \    
+╚══════╝       ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝  |_|  |_|   \___|/_/ \_\   
 </pre>
 </div>
 
@@ -14,15 +14,33 @@
 **Z-Core FPGA Implementation for DE10-Lite Board**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![RISC-V](https://img.shields.io/badge/RISC--V-RV32IM-green?logo=riscv)
 [![FPGA](https://img.shields.io/badge/FPGA-MAX%2010-0071c5.svg)](https://www.altera.com/asap/offering/a1jui0000049upbmam/max-10-device-family-de10-lite-board)
 [![Board](https://img.shields.io/badge/Board-DE10--Lite-00a98f.svg)](https://www.terasic.com.tw/cgi-bin/page/archive.pl?Language=English&No=1021)
+
 
 </div>
 
 
 ---
 
-> **Note**: For Z-Core processor architecture, pipeline implementation, verification methodology, and ISA compliance documentation, refer to the main **[Z-Core repository](https://github.com/paudiaz99/Z-Core)**.
+## Block Diagram
+
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/fec3a0e0-5cef-46e4-a3fd-7f07b1387a11" alt="centered image">
+  <br>
+  <sup>Z-Core SoC Architecture.</sup>
+</div>
+
+## Z-Core RV32IM Architecture
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/c02b2a54-ae7c-4070-adcd-875faa8720d2" alt="centered image">
+  <br>
+  <sup>Z-Core RV32IM Architecture Diagram.</sup>
+</div>
+
+
+> **Note**: For Z-Core detailed processor architecture explanation, pipeline implementation, verification methodology, and ISA compliance documentation, refer to the main **[Z-Core repository](https://github.com/paudiaz99/Z-Core)**.
 
 ---
 
@@ -104,7 +122,7 @@ The software is located in the `software/` directory. It contains multiple examp
 
 ### Examples
 
-- `hello`: A simple "Hello, World!" program. Sends Messages via UART.
+- `hello`: A simple "Hello, World!" program. Sends messages via UART.
 - `led_test`: A program that blinks the LEDs on the DE10-Lite board.
 - `gpio_test`: A program that tests the GPIO functionality of the Z-Core processor.
 - `game_test`: A program that implements a simple Pong game through UART (Isn't it fun? :D).
@@ -162,13 +180,16 @@ The capability of using the 64MB SDRAM will be added in the future.
 │   ├── z_core_csr_file.v      # CSR File (Zicsr)
 │   ├── z_core_instr_cache.v   # Instruction Cache
 │   ├── z_core_branch_pred.v   # Branch Predictor
-│   ├── z_core_mult_unit.v     # Multiplier Unit
+│   ├── z_core_mult_unit.v     # Multiplication Unit
+│   ├── z_core_mult_tree.v     # Wallace Tree Multiplier
+│   ├── z_core_mult_synth.v    # Synthesizable Multiplier Wrapper
 │   ├── z_core_div_unit.v      # Division Unit
 │   ├── axil_interconnect.v    # AXI-Lite Bus Interconnect
 │   ├── axil_timer.v           # 64-bit Timer Peripheral
 │   ├── axil_vga.v             # VGA Controller Peripheral
 │   ├── axil_uart.v            # UART Peripheral
 │   ├── axil_gpio.v            # GPIO Peripheral
+│   ├── axil_master.v          # AXI-Lite Master Interface
 │   └── axi_mem.v              # AXI-Lite RAM Interface
 │
 ├── software/                   # Example programs and tools
@@ -178,7 +199,9 @@ The capability of using the 64MB SDRAM will be added in the future.
 │   ├── hello.c                # Main example application
 │   ├── led_test.c             # LED peripheral test
 │   ├── gpio_test.c            # GPIO peripheral test
-│   ├── game_test.c            # Pong Game test
+│   ├── vga_test.c             # VGA peripheral test
+│   ├── pong.c                 # Pong Game
+│   ├── space.c       # Space Invaders Game
 │   ├── multiplication.c       # Multiplication test
 │   ├── start.S                # RISC-V Startup code
 │   ├── linker.ld              # Linker script
