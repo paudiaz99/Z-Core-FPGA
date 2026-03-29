@@ -22,26 +22,15 @@ SOFTWARE.
 
 */
 
-// **************************************************
-//                AXI-Lite GPIO (Bidirectional)
-//  - 64 GPIOs (configurable via N_GPIO)
-//  - Address Map (Assuming 32-bit Data Bus):
-//      Offset 0x00: DATA[31:0]  (Read: Pin State, Write: Output Latch)
-//      Offset 0x04: DATA[63:32]
-//      Offset 0x08: DIR[31:0]   (0 = Input/High-Z, 1 = Output)
-//      Offset 0x0C: DIR[63:32]
-// **************************************************
 
-module axil_gpio #
-(
+module axil_timer #(
     parameter DATA_WIDTH = 32,
     parameter ADDR_WIDTH = 32,
-    parameter STRB_WIDTH = (DATA_WIDTH/8),
-    parameter N_GPIO     = 64
-)
+    parameter STRB_WIDTH = (DATA_WIDTH/8)
+) 
 (
     input  wire                   clk,
-    input  wire                   rst,
+    input  wire                   rstn,
 
     // AXI-Lite Slave Interface
     input  wire [ADDR_WIDTH-1:0]  s_axil_awaddr,
@@ -64,14 +53,44 @@ module axil_gpio #
     output wire                   s_axil_rvalid,
     input  wire                   s_axil_rready,
 
-    // Bidirectional GPIOs
-    inout  wire [N_GPIO-1:0]      gpio
+    input wire ext_event_i,
+
+    output wire timer_irq_o
+
 );
 
+    
     // =========================================================================
-    // Registers & Wires
+    // Memory Mapped Registers
     // =========================================================================
     
+    wire [DATA_WIDTH-1:0] timer_lo;       // 0x00 -> Timer Low  (counter inside the timer)
+    wire [DATA_WIDTH-1:0] timer_hi;       // 0x04 -> Timer High (counter inside the timer)
+    reg  [DATA_WIDTH-1:0] timer_ctrl;     // 0x08 -> Timer Control
+    reg  [DATA_WIDTH-1:0] timecmp_lo_r;   // 0x0C -> Compare Low  (new)
+    reg  [DATA_WIDTH-1:0] timecmp_hi_r;   // 0x10 -> Compare High (new)
+
+    // =========================================================================
+    // Internal Wires and Registers
+    // =========================================================================
+    
+    wire timer_lo_overflow;
+    wire timer_hi_overflow;
+
+    wire timer_lo_enable;
+    wire timer_hi_enable;
+
+    reg [DATA_WIDTH-1:0] timer_lo_load_val;
+    reg [DATA_WIDTH-1:0] timer_hi_load_val;
+
+    reg load_lo;
+    reg load_hi;
+    
+
+    // =========================================================================
+    // AXI-Lite Registers & Wires
+    // =========================================================================
+
     // AXI-Lite Status
     reg s_axil_awready_reg;
     reg s_axil_wready_reg;
@@ -87,15 +106,6 @@ module axil_gpio #
     reg [STRB_WIDTH-1:0] axi_wstrb;
     reg axi_wready_flag;
 
-    // GPIO Internal Registers
-    reg [N_GPIO-1:0] gpio_data_out; // Stores value to drive when DIR=1
-    reg [N_GPIO-1:0] gpio_dir;      // 1 = Output, 0 = Input
-    
-    // Padded signals for safe register access
-    wire [63:0] gpio_data_out_padded = {{(64-N_GPIO){1'b0}}, gpio_data_out};
-    wire [63:0] gpio_dir_padded      = {{(64-N_GPIO){1'b0}}, gpio_dir};
-    wire [63:0] gpio_in_padded       = {{(64-N_GPIO){1'b0}}, gpio};
-
     // Assignments
     assign s_axil_awready = s_axil_awready_reg;
     assign s_axil_wready  = s_axil_wready_reg;
@@ -106,22 +116,12 @@ module axil_gpio #
     assign s_axil_rresp   = 2'b00; // OKAY
     assign s_axil_rvalid  = s_axil_rvalid_reg;
 
-    // =========================================================================
-    // IO Logic (Tri-state)
-    // =========================================================================
-    // If bit i is Output (dir=1), drive switch. If Input (dir=0), Float (z).
-    genvar i;
-    generate
-        for (i = 0; i < N_GPIO; i = i + 1) begin : gpio_io_buffers
-            assign gpio[i] = gpio_dir[i] ? gpio_data_out[i] : 1'bz;
-        end
-    endgenerate
 
     // =========================================================================
     // Write Channel Logic
     // =========================================================================
     always @(posedge clk) begin
-        if (rst) begin
+        if (~rstn) begin
             s_axil_awready_reg <= 1'b0;
             s_axil_wready_reg  <= 1'b0;
             s_axil_bvalid_reg  <= 1'b0;
@@ -130,10 +130,9 @@ module axil_gpio #
             axi_awaddr         <= {ADDR_WIDTH{1'b0}};
             axi_wdata          <= {DATA_WIDTH{1'b0}};
             axi_wstrb          <= {STRB_WIDTH{1'b0}};
-            
-            // Defaut: All Inputs (Safe state), Data Out 0
-            gpio_data_out      <= {N_GPIO{1'b0}};
-            gpio_dir           <= {N_GPIO{1'b0}}; 
+            timer_ctrl         <= {DATA_WIDTH{1'b0}};
+            timecmp_lo_r       <= {DATA_WIDTH{1'b1}}; // Max value so IRQ is not immediately asserted
+            timecmp_hi_r       <= {DATA_WIDTH{1'b1}};
         end else begin
             // Address Handshake
             if (~s_axil_awready_reg && s_axil_awvalid && ~axi_awready_flag && ~s_axil_bvalid_reg) begin
@@ -160,42 +159,32 @@ module axil_gpio #
                 axi_awready_flag  <= 1'b0;
                 axi_wready_flag   <= 1'b0;
 
-                // Decode Address
-                // 0x00: Data Low, 0x04: Data High
-                // 0x08: Dir Low,  0x0C: Dir High
-                
-                case (axi_awaddr[3:2])
-                    2'b00: begin // 0x00: DATA[31:0]
-                        if (axi_wstrb[0] && N_GPIO > 0)  gpio_data_out[7:0 < N_GPIO ? 7:0]   <= axi_wdata[7:0];
-                        if (axi_wstrb[1] && N_GPIO > 8)  gpio_data_out[15:8 < N_GPIO ? 15:8]  <= axi_wdata[15:8];
-                        if (axi_wstrb[2] && N_GPIO > 16) gpio_data_out[23:16 < N_GPIO ? 23:16] <= axi_wdata[23:16];
-                        if (axi_wstrb[3] && N_GPIO > 24) gpio_data_out[31:24 < N_GPIO ? 31:24] <= axi_wdata[31:24];
+                case (axi_awaddr[4:2])
+                    3'b000: begin // 0x00: timer_lo[31:0]
+                        timer_lo_load_val <= axi_wdata;
+                        load_lo <= 1'b1;
                     end
-                    2'b01: begin // 0x04: DATA[63:32]
-                         if (N_GPIO > 32) begin
-                            if (axi_wstrb[0]) if(N_GPIO>32) gpio_data_out[39:32] <= axi_wdata[7:0];
-                            if (axi_wstrb[1]) if(N_GPIO>40) gpio_data_out[47:40] <= axi_wdata[15:8];
-                            if (axi_wstrb[2]) if(N_GPIO>48) gpio_data_out[55:48] <= axi_wdata[23:16];
-                            if (axi_wstrb[3]) if(N_GPIO>56) gpio_data_out[63:56] <= axi_wdata[31:24];
-                        end
+                    3'b001: begin // 0x04: timer_hi[63:32]
+                        timer_hi_load_val <= axi_wdata;
+                        load_hi <= 1'b1;
                     end
-                    2'b10: begin // 0x08: DIR[31:0]
-                        if (axi_wstrb[0] && N_GPIO > 0)  gpio_dir[7:0 < N_GPIO ? 7:0]   <= axi_wdata[7:0];
-                        if (axi_wstrb[1] && N_GPIO > 8)  gpio_dir[15:8 < N_GPIO ? 15:8]  <= axi_wdata[15:8];
-                        if (axi_wstrb[2] && N_GPIO > 16) gpio_dir[23:16 < N_GPIO ? 23:16] <= axi_wdata[23:16];
-                        if (axi_wstrb[3] && N_GPIO > 24) gpio_dir[31:24 < N_GPIO ? 31:24] <= axi_wdata[31:24];
+                    3'b010: begin // 0x08: timer_ctrl[31:0]
+                        timer_ctrl <= axi_wdata;
                     end
-                    2'b11: begin // 0x0C: DIR[63:32]
-                        if (N_GPIO > 32) begin
-                            if (axi_wstrb[0]) if(N_GPIO>32) gpio_dir[39:32] <= axi_wdata[7:0];
-                            if (axi_wstrb[1]) if(N_GPIO>40) gpio_dir[47:40] <= axi_wdata[15:8];
-                            if (axi_wstrb[2]) if(N_GPIO>48) gpio_dir[55:48] <= axi_wdata[23:16];
-                            if (axi_wstrb[3]) if(N_GPIO>56) gpio_dir[63:56] <= axi_wdata[31:24];
-                        end
+                    3'b011: begin // 0x0C: timecmp_lo[31:0]
+                        timecmp_lo_r <= axi_wdata;
+                    end
+                    3'b100: begin // 0x10: timecmp_hi[63:32]
+                        timecmp_hi_r <= axi_wdata;
                     end
                 endcase
+            end else begin
+                // Auto-clear load flags
+                load_lo <= 1'b0;
+                load_hi <= 1'b0;
+            end 
 
-            end else if (s_axil_bvalid_reg && s_axil_bready) begin
+            if (s_axil_bvalid_reg && s_axil_bready) begin
                 s_axil_bvalid_reg <= 1'b0;
             end
         end
@@ -205,7 +194,7 @@ module axil_gpio #
     // Read Channel Logic
     // =========================================================================
     always @(posedge clk) begin
-        if (rst) begin
+        if (~rstn) begin
             s_axil_arready_reg <= 1'b0;
             s_axil_rvalid_reg  <= 1'b0;
             s_axil_rdata_reg   <= {DATA_WIDTH{1'b0}};
@@ -213,21 +202,13 @@ module axil_gpio #
             if (~s_axil_arready_reg && s_axil_arvalid && ~s_axil_rvalid_reg) begin
                 s_axil_arready_reg <= 1'b1;
                 
-                // Read Logic
-                case (s_axil_araddr[3:2])
-                    2'b00: begin // 0x00: Read DATA[31:0] (Sampled from IO Pins)
-                        s_axil_rdata_reg <= gpio_in_padded[31:0];
-                    end
-                    2'b01: begin // 0x04: Read DATA[63:32]
-                        s_axil_rdata_reg <= gpio_in_padded[63:32];
-                    end
-                    2'b10: begin // 0x08: Read DIR[31:0]
-                        s_axil_rdata_reg <= gpio_dir_padded[31:0];
-                    end
-                    2'b11: begin // 0x0C: Read DIR[63:32]
-                        s_axil_rdata_reg <= gpio_dir_padded[63:32];
-                    end
-                    default: s_axil_rdata_reg <= 32'b0;
+                case (s_axil_araddr[4:2])
+                    3'b000: s_axil_rdata_reg <= timer_lo;       // 0x00
+                    3'b001: s_axil_rdata_reg <= timer_hi;       // 0x04
+                    3'b010: s_axil_rdata_reg <= timer_ctrl;     // 0x08
+                    3'b011: s_axil_rdata_reg <= timecmp_lo_r;   // 0x0C
+                    3'b100: s_axil_rdata_reg <= timecmp_hi_r;   // 0x10
+                    default: s_axil_rdata_reg <= {DATA_WIDTH{1'b0}};
                 endcase
             end else begin
                 s_axil_arready_reg <= 1'b0;
@@ -240,5 +221,52 @@ module axil_gpio #
             end
         end
     end
+
+    // Timer Logic
+    
+    // Timer Control Register (Bits):
+    // 0 -> Enable/Disable Timer
+    // 1 -> Count Up / Count Down
+    // 2 -> Timer / Counter Mode (0: Timer, 1: Counter)
+    // 3 -> Interrupt Enable (gates timer_irq_o)
+
+    assign timer_irq_o = timer_ctrl[3] & ({timer_hi, timer_lo} >= {timecmp_hi_r, timecmp_lo_r});
+
+    // External Signal Edge Detection
+    reg ext_event_r;
+    always @(posedge clk) begin
+        ext_event_r <= ext_event_i;
+    end
+
+    wire ext_event_edge = ~ext_event_r & ext_event_i;
+
+    wire count_pulse = timer_ctrl[2] ? ext_event_edge : 1'b1;
+
+    assign timer_lo_enable = timer_ctrl[0] & count_pulse;
+    assign timer_hi_enable = timer_ctrl[0] & (timer_lo_overflow) & count_pulse;
+
+    z_core_32b_timer timer_lo_inst (
+        .clk(clk),
+        .rstn(rstn),
+        .enable(timer_lo_enable),
+        .load(load_lo),
+        .load_val(timer_lo_load_val),
+        .count_up(timer_ctrl[1]),
+        .overflow(timer_lo_overflow),
+        .timer(timer_lo)
+    );
+
+    z_core_32b_timer timer_hi_inst (
+        .clk(clk),
+        .rstn(rstn),
+        .enable(timer_hi_enable),
+        .load(load_hi),
+        .load_val(timer_hi_load_val),
+        .count_up(timer_ctrl[1]),
+        .overflow(timer_hi_overflow),
+        .timer(timer_hi)
+    );
+
+
 
 endmodule

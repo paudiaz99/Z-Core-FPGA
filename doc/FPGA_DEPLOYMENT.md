@@ -30,16 +30,16 @@ The Z-Core is a pipelined RISC-V RV32IM processor designed for educational purpo
 │                                                                 │
 │  ┌──────────────┐     ┌───────────────────┐                     │
 │  │    Z-Core    │     │      AXI-Lite     │                     │
-│  │    (RV32IM)  │────>│    Interconnect   │                     │
+│  │ (RV32IMZicsr)│────>│    Interconnect   │                     │
 │  │              │     │                   │                     │
 │  └──────────────┘     └───────┬───────────┘                     │
 │                               │                                 │
-│            ┌──────────────────┼──────────────────┐              │
-│            ▼                  ▼                  ▼              │
-│    ┌──────────────┐   ┌──────────────┐   ┌──────────────┐       │
-│    │   Block RAM  │   │     UART     │   │     GPIO     │       │
-│    │   (4 KB)     │   │  (9600 baud) │   │  (64 pins)   │       │
-│    └──────────────┘   └──────────────┘   └──────────────┘       │
+│         ┌─────────────┬───────┴───────┬─────────────┐           │
+│         ▼             ▼               ▼             ▼           │
+│  ┌────────────┐ ┌────────────┐  ┌────────────┐ ┌────────────┐   │
+│  │ Block RAM  │ │    UART    │  │    GPIO    │ │ VGA / Timer│   │
+│  │  (16 KB)   │ │(115200 bd) │  │  (16 pins) │ │(Peripherals)│   │
+│  └────────────┘ └────────────┘  └────────────┘ └────────────┘   │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -48,17 +48,23 @@ The Z-Core is a pipelined RISC-V RV32IM processor designed for educational purpo
 
 | Address Range              | Size   | Peripheral | Description                       |
 |----------------------------|--------|------------|-----------------------------------|
-| `0x0000_0000 - 0x0000_0FFF`| 4 KB   | Block RAM  | Program memory (code + data)      |
+| `0x0000_0000 - 0x0000_0FFF`| 4 KB   | Block RAM  | Bootloader (MIF initialization)   |
+| `0x0000_1000 - 0x0000_3FFF`| 12 KB  | Block RAM  | Application Space (UART upload)   |
 | `0x0400_0000 - 0x0400_0FFF`| 4 KB   | UART       | Serial communication              |
 | `0x0400_1000 - 0x0400_1FFF`| 4 KB   | GPIO       | General-purpose I/O               |
+| `0x0400_2000 - 0x0400_2FFF`| 4 KB   | Timer      | 64-bit Timer/Counter              |
+| `0x0400_3000 - 0x0400_3FFF`| 4 KB   | VGA        | 160x120 VGA Controller            |
 
 > [!IMPORTANT]
-> **Current Memory Limitation**: The system currently uses **4 KB (4096 bytes)** of on-chip block RAM for program memory. This is *not* the FPGA's external SDRAM (64 MB). The block RAM is configured with `ADDR_WIDTH=12` bits, yielding 2^10 = 1024 addressable 32-bit words.
+> **Memory Segmentation**: The 16 KB of on-chip RAM is split into two regions:
+> 1. **Bootloader**: The first 4 KB (`0x0000-0x0FFF`) contain the fixed bootloader code.
+> 2. **Application**: The remaining 12 KB (`0x1000-0x3FFF`) are available for user programs.
 
 ### Clocking
 
 - **Input Clock**: `MAX10_CLK1_50` — 50 MHz oscillator on DE10-Lite
-- **CPU Clock**: 50 MHz (synchronous, no PLL division)
+- **CPU Clock**: 50 MHz
+- **UART Baud**: 115200 (for bootloader and user apps)
 - **Timing Constraints**: Defined in `Z-Core.sdc` (20 ns period constraint)
 
 ### Reset Signal
@@ -131,7 +137,7 @@ riscv64-unknown-elf-objcopy --version
 
 | Flag             | Description                                           |
 |------------------|-------------------------------------------------------|
-| `-march=rv32i`   | Target ISA: RV32I (32-bit base integer)               |
+| `-march=rv32im_zicsr` | Target ISA: RV32IM + Zicsr (32-bit integer + Mul/Div + CSR) |
 | `-mabi=ilp32`    | ABI: 32-bit integers, longs, and pointers             |
 | `-O2`            | Optimization level 2 (recommended for size/speed)     |
 | `-nostartfiles`  | Do not link standard startup files (crt0, etc.)       |
@@ -163,7 +169,7 @@ ENTRY(_start)
 
 MEMORY
 {
-    RAM (rwx) : ORIGIN = 0x00000000, LENGTH = 4K
+    RAM (rwx) : ORIGIN = 0x00001000, LENGTH = 12K
 }
 
 SECTIONS
@@ -578,7 +584,59 @@ $ riscv64-unknown-elf-size hello.elf
 | Timing Constraints       | `Z-Core.sdc` (must be in project)           |
 | Device                   | MAX 10 (10M50DAF484C7G)                     |
 | Top-Level Entity         | `z_core_top`                                |
-| Memory Initialization    | Automatic via `$readmemh` and `INIT_FILE`   |
+| Memory Initialization    | Via `bootloader.mif` (M9K configuration)     |
+
+---
+
+## The Bootloader Flow (Fast)
+
+The bootloader allows you to upload and run applications in seconds without recompiling the FPGA bitstream. This is the recommended workflow for software development.
+
+### Step 1 — Compile Application
+Navigate to the `software/` directory and build your program using the application linker script (`linker_app.ld`):
+
+```bash
+cd software/
+make APP=1 cube3d.bin
+```
+*Note: `APP=1` ensures the code starts at `0x1000`.*
+
+### Step 2 — Upload via UART
+Use the provided Python script to send the binary to the FPGA. Replace `/dev/ttyUSB0` with your serial port.
+
+```bash
+python3 upload.py /dev/ttyUSB0 cube3d.bin
+```
+The script will perform a handshake, send the binary, verify the checksum, and then jump to the application entry point.
+
+### Step 3 — Monitor
+The `upload.py` script automatically enters terminal mode after a successful upload. You can see UART output from your program immediately. Press `Ctrl+C` to exit the terminal.
+
+To upload without entering terminal mode:
+```bash
+python3 upload.py /dev/ttyUSB0 cube3d.bin -n
+```
+
+---
+
+## The Bootloader Update Flow (Slow)
+
+If you modify the bootloader itself or the FPGA hardware peripherals, you must perform a full Quartus recompile.
+
+### Step 1 — Compile Bootloader
+```bash
+cd software/bootloader/
+make
+```
+This produces `bootloader.mif`, which is used by Quartus to initialize the RAM internal content during synthesis.
+
+### Step 2 — Recompile FPGA Bitstream
+1. Open Quartus.
+2. Run **Start Compilation** (`Ctrl+L`). This captures the new `.mif` and embeds it in the `.sof` bitstream.
+
+### Step 3 — Program via JTAG
+1. Tools → Programmer.
+2. Load `output_files/Z-Core.sof` and click **Start**.
 
 ---
 

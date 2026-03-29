@@ -22,17 +22,16 @@ SOFTWARE.
 
 */
 
-// **************************************************
+// ****************************************************
 //                 Z-Core Control Unit
-//        5-Stage Pipelined RISC-V RV32I Processor
-// **************************************************
-
-`timescale 1ns / 1ns
+//     5-Stage Pipelined RISC-V RV32IMZicsr Processor
+// ****************************************************
 
 module z_core_control_u #(
     parameter DATA_WIDTH = 32,
     parameter ADDR_WIDTH = 32,
-    parameter STRB_WIDTH = (DATA_WIDTH/8)
+    parameter STRB_WIDTH = (DATA_WIDTH/8),
+    parameter CACHE_DEPTH = 256
 )(
     input  wire                   clk,
     input  wire                   rstn,
@@ -58,8 +57,10 @@ module z_core_control_u #(
     input  wire                   m_axil_rvalid,
     output wire                   m_axil_rready,
 
-    // Halt signal (ECALL/EBREAK detected - for RISCOF signature dump)
-    output wire                   halt
+    // External Interrupt Inputs
+    input  wire                   meip,    // Machine External Interrupt Pending
+    input  wire                   mtip,    // Machine Timer Interrupt Pending
+    input  wire                   msip     // Machine Software Interrupt Pending
 );
 
 // **************************************************
@@ -93,12 +94,11 @@ wire                  mem_busy;
 reg                   mem_wen_comb;
 reg                   mem_req_comb;
 
-assign mem_req = mem_req_comb;
-assign mem_wen = mem_wen_comb;
-
-
 reg  [31:0]           mem_data_out_r;
 reg  [STRB_WIDTH-1:0] mem_wstrb_r;
+
+wire mem_req = mem_req_comb;
+wire mem_wen = mem_wen_comb;
 
 axil_master #(
     .DATA_WIDTH(DATA_WIDTH),
@@ -143,6 +143,25 @@ axil_master #(
 localparam PC_INIT = 32'd0;
 reg [31:0] PC;
 
+
+reg fetch_wait;
+reg [31:0] fetch_pc;  // Captures PC when fetch starts - used when fetch completes
+reg mem_op_pending;
+
+
+// ##################################################
+//           PERFORMANCE COUNTERS
+// ##################################################
+
+reg [63:0] perf_cycle;
+reg [63:0] perf_instret;
+reg [63:0] perf_inst_cache_hits;
+reg [63:0] perf_inst_fetch;
+reg [63:0] perf_memory_reads;
+reg [63:0] perf_memory_writes;
+reg [63:0] perf_pipeline_flush;
+
+
 // ##################################################
 //              PIPELINE REGISTERS
 // ##################################################
@@ -151,6 +170,8 @@ reg [31:0] PC;
 reg [31:0] if_id_pc;
 reg [31:0] if_id_ir;
 reg        if_id_valid;
+reg        if_id_branch_taken_pred;
+reg [31:0] if_id_branch_target_pred;
 
 // --- Skid Buffer for Fetch ---
 reg [31:0] fetch_buffer_ir;
@@ -169,29 +190,71 @@ reg [4:0]  id_ex_alu_op;
 reg [2:0]  id_ex_funct3;
 reg        id_ex_is_load, id_ex_is_store, id_ex_is_branch;
 reg        id_ex_is_jal, id_ex_is_jalr, id_ex_is_lui, id_ex_is_auipc, id_ex_is_div;
-reg        id_ex_is_r_type, id_ex_is_i_alu;
+reg        id_ex_is_i_alu;
 reg        id_ex_reg_write;
 reg        id_ex_valid;
+reg        id_ex_branch_taken_pred;
+reg [31:0] id_ex_branch_target_pred;
+
+// --- ID/EX CSR Pipeline Fields (Zicsr) ---
+reg        id_ex_is_csr;
+reg        id_ex_is_mret;
+reg [11:0] id_ex_csr_addr;
+reg [4:0]  id_ex_csr_zimm;
+
+// --- ID/EX Exception Pipeline Fields ---
+reg        id_ex_is_ecall;
+reg        id_ex_is_ebreak;
+reg        id_ex_is_illegal;
+reg [31:0] id_ex_ir;         // Raw instruction (for mtval on illegal insn)
 
 // --- EX/MEM Pipeline Register ---
-reg [31:0] ex_mem_pc;
 reg [31:0] ex_mem_alu_result;
 reg [31:0] ex_mem_rs2_data;
 reg [4:0]  ex_mem_rd;
 reg [2:0]  ex_mem_funct3;
-reg        ex_mem_is_load, ex_mem_is_store, ex_mem_is_div;
+reg        ex_mem_is_load, ex_mem_is_store;
 reg        ex_mem_reg_write;
 reg        ex_mem_valid;
 
 // --- MEM/WB Pipeline Register ---
 reg [31:0] mem_wb_result;
-reg [31:0] mem_wb_pc;  // PC for debug tracing
 reg [4:0]  mem_wb_rd;
 reg        mem_wb_reg_write;
 reg        mem_wb_valid;
 
 // ##################################################
-//             INSTRUCTION DECODER (uses z_core_decoder)
+//       INSTRUCTION CACHE (uses z_core_instr_cache)
+// ##################################################
+
+wire [31:0] instr_cache_address;
+reg [31:0] instr_cache_data_in;
+reg instr_cache_wen;
+
+wire [31:0] instr_cache_data_out;
+wire instr_cache_valid;
+wire instr_cache_cache_hit;
+wire instr_cache_cache_miss;
+
+z_core_instr_cache#(
+    .DATA_WIDTH(DATA_WIDTH),
+    .ADDR_WIDTH(ADDR_WIDTH),
+    .CACHE_DEPTH(CACHE_DEPTH)
+) instr_cache (
+    .clk(clk),
+    .rstn(rstn),
+    .wen(instr_cache_wen), 
+    .addr_rd(instr_cache_address),
+    .addr_wr(fetch_pc),
+    .data_in(instr_cache_data_in),
+    .data_out(instr_cache_data_out),
+    .valid(instr_cache_valid),
+    .cache_hit(instr_cache_cache_hit),
+    .cache_miss(instr_cache_cache_miss)
+);
+
+// ##################################################
+//      INSTRUCTION DECODER (uses z_core_decoder)
 // ##################################################
 
 wire [6:0]  dec_op;
@@ -199,6 +262,8 @@ wire [4:0]  dec_rs1, dec_rs2, dec_rd;
 wire [31:0] dec_Iimm, dec_Simm, dec_Uimm, dec_Bimm, dec_Jimm;
 wire [2:0]  dec_funct3;
 wire [6:0]  dec_funct7;
+wire [11:0] dec_csr_addr;
+wire [4:0]  dec_csr_zimm;
 
 z_core_decoder decoder (
     .inst(if_id_ir),
@@ -212,7 +277,9 @@ z_core_decoder decoder (
     .Bimm(dec_Bimm),
     .Jimm(dec_Jimm),
     .funct3(dec_funct3),
-    .funct7(dec_funct7)
+    .funct7(dec_funct7),
+    .csr_addr(dec_csr_addr),
+    .csr_zimm(dec_csr_zimm)
 );
 
 // ##################################################
@@ -240,8 +307,22 @@ wire dec_is_auipc  = (dec_op == AUIPC_INST);
 wire dec_is_r_type = (dec_op == R_INST);
 wire dec_is_i_alu  = (dec_op == I_INST);
 wire dec_is_div    = (dec_op == R_INST) & (dec_alu_op >= 5'd20) & (dec_alu_op <= 5'd23);
+
+// Zicsr / System instruction detection
+wire dec_is_csr    = (dec_op == SYSTEM_INST) && (dec_funct3 != 3'b000);
+wire dec_is_mret   = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h302);
+
+// Illegal: opcode doesn't match any known type (0x00000000 is treated as NOP)
+wire dec_is_fence  = (dec_op == FENCE_INST);
+wire dec_opcode_valid = dec_is_load | dec_is_store | dec_is_branch |
+                        dec_is_jal | dec_is_jalr | dec_is_lui | dec_is_auipc |
+                        dec_is_r_type | dec_is_i_alu | dec_is_csr |
+                        dec_is_mret | dec_is_ecall | dec_is_ebreak | dec_is_fence;
+wire dec_is_illegal = if_id_valid && !dec_opcode_valid && (if_id_ir != 32'h0);
+
 wire dec_reg_write = dec_is_r_type | dec_is_i_alu | dec_is_load | 
-                     dec_is_jal | dec_is_jalr | dec_is_lui | dec_is_auipc;
+                     dec_is_jal | dec_is_jalr | dec_is_lui | dec_is_auipc |
+                     dec_is_csr;
 
 // Immediate mux
 wire [31:0] dec_imm = dec_is_i_alu | dec_is_load | dec_is_jalr ? dec_Iimm :
@@ -268,7 +349,8 @@ z_core_reg_file reg_file (
     .rs2_out(rf_rs2_data)
 );
 
-
+wire [31:0] fwd_rs1_data;
+wire [31:0] fwd_rs2_data;
 // ##################################################
 //                   ALU (uses z_core_alu)
 // ##################################################
@@ -336,12 +418,12 @@ z_core_div_unit div_unit (
 // ##################################################
 
 // Forward from EX/MEM or MEM/WB to resolve RAW hazards
-wire [31:0] fwd_rs1_data = 
+assign fwd_rs1_data = 
     (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == id_ex_rs1_addr && ex_mem_rd != 5'b0) ? ex_mem_alu_result :
     (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs1_addr && mem_wb_rd != 5'b0) ? mem_wb_result :
     id_ex_rs1_data;
 
-wire [31:0] fwd_rs2_data = 
+assign fwd_rs2_data = 
     (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == id_ex_rs2_addr && ex_mem_rd != 5'b0) ? ex_mem_alu_result :
     (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs2_addr && mem_wb_rd != 5'b0) ? mem_wb_result :
     id_ex_rs2_data;
@@ -358,12 +440,93 @@ wire load_use_hazard = id_ex_valid && id_ex_is_load && if_id_valid &&
 // Memory operation in progress - stall whole pipeline  
 wire mem_stall = mem_op_pending && !mem_ready;
 
-// System Instruction Detection (for RISCOF halt signal)
+// System Instruction Detection
 wire dec_is_ecall  = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h000);
 wire dec_is_ebreak = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h001);
 
-// Halt signal for RISCOF compliance testing (ECALL/EBREAK detection in ID stage)
-assign halt = if_id_valid && (dec_is_ecall || dec_is_ebreak);
+// ##################################################
+//       MISALIGNMENT EXCEPTION DETECTION
+// ##################################################
+
+// Misaligned instruction fetch (cause 0): branch/jump to non-4B-aligned target (no C extension)
+wire misalign_branch = id_ex_valid && id_ex_is_branch && alu_branch && (branch_target[1:0] != 2'b00);
+wire misalign_jump   = id_ex_valid && (id_ex_is_jal || id_ex_is_jalr) && (jump_target[1:0] != 2'b00);
+
+// Misaligned load (cause 4): LH/LHU at odd addr, LW at non-4B-aligned addr
+wire misalign_load = id_ex_valid && id_ex_is_load &&
+    ((id_ex_funct3[1:0] == 2'b01 && alu_out[0]  != 1'b0) ||      // LH/LHU
+     (id_ex_funct3[1:0] == 2'b10 && alu_out[1:0] != 2'b00));     // LW
+
+// Misaligned store (cause 6): SH at odd addr, SW at non-4B-aligned addr
+wire misalign_store = id_ex_valid && id_ex_is_store &&
+    ((id_ex_funct3[1:0] == 2'b01 && alu_out[0]  != 1'b0) ||      // SH
+     (id_ex_funct3[1:0] == 2'b10 && alu_out[1:0] != 2'b00));     // SW
+
+// ##################################################
+//     CSR FILE INSTANTIATION (Zicsr Extension)
+// ##################################################
+
+wire [31:0] csr_read_data;
+reg  [31:0] csr_write_data;
+wire        csr_wen;
+
+// CSR source: rs1 for register variants, zero-extended zimm for immediate
+wire [31:0] csr_src = id_ex_funct3[2] ? {27'b0, id_ex_csr_zimm} : fwd_rs1_data;
+
+// Write suppression per §2.8: CSRRS/CSRRC with rs1=x0 or zimm=0 → no write
+wire csr_src_is_zero = id_ex_funct3[2] ? (id_ex_csr_zimm == 5'b0) : (id_ex_rs1_addr == 5'b0);
+assign csr_wen = id_ex_valid && id_ex_is_csr && !trap_enter_r && !ex_stall &&
+                 (id_ex_funct3[1:0] == 2'b01 || !csr_src_is_zero);
+
+always @(*) begin
+    case (id_ex_funct3[1:0])
+        2'b01:   csr_write_data = csr_src;                     // CSRRW / CSRRWI
+        2'b10:   csr_write_data = csr_read_data | csr_src;     // CSRRS / CSRRSI
+        2'b11:   csr_write_data = csr_read_data & ~csr_src;    // CSRRC / CSRRCI
+        default: csr_write_data = csr_src;                     // Fallback
+    endcase
+end
+
+reg  trap_enter_r;
+reg  [31:0] trap_mepc_r;
+reg  [31:0] trap_mcause_r;
+reg  [31:0] trap_mtval_r;
+wire mret_in_ex = id_ex_valid && id_ex_is_mret;
+
+wire        csr_mstatus_mie;
+wire [31:0] csr_mtvec;
+wire [31:0] csr_mepc;
+wire        csr_irq_pending;
+wire        csr_mie_meie;
+wire        csr_mie_mtie;
+wire        csr_mie_msie;
+
+z_core_csr_file #(
+    .DATA_WIDTH(DATA_WIDTH)
+) u_csr_file (
+    .clk(clk),
+    .rstn(rstn),
+    .csr_addr(id_ex_csr_addr),
+    .csr_write_data(csr_write_data),
+    .csr_wen(csr_wen),
+    .csr_read_data(csr_read_data),
+    .trap_enter(trap_enter_r),
+    .trap_mepc(trap_mepc_r),
+    .trap_mcause(trap_mcause_r),
+    .trap_mtval(trap_mtval_r),
+    .mret_exec(mret_in_ex),
+    .meip(meip),
+    .mtip(mtip),
+    .msip(msip),
+    .instret_pulse(mem_wb_valid),
+    .mstatus_mie(csr_mstatus_mie),
+    .mtvec_out(csr_mtvec),
+    .mepc_out(csr_mepc),
+    .irq_pending(csr_irq_pending),
+    .mie_meie_out(csr_mie_meie),
+    .mie_mtie_out(csr_mie_mtie),
+    .mie_msie_out(csr_mie_msie)
+);
 
 
 // Need to stall EX stage if:
@@ -385,11 +548,37 @@ wire stall = load_use_hazard || ex_stall;
 // ##################################################
 
 wire branch_taken = id_ex_valid && id_ex_is_branch && alu_branch;
-wire jump_taken   = id_ex_valid && (id_ex_is_jal || id_ex_is_jalr);
+wire is_jump   = id_ex_valid && (id_ex_is_jal || id_ex_is_jalr);
 
-// Flush = control transfer detected in EX stage
-// Need to squash the instruction that was in IF/ID when JAL entered ID/EX
-wire flush        = branch_taken || jump_taken;
+wire branch_taken_pred;
+wire id_ex_branch_taken_pred_valid = id_ex_branch_taken_pred & id_ex_valid;
+wire [31:0] branch_target_pred;
+wire is_branch = id_ex_is_branch & id_ex_valid;
+wire branch_target_misspredict;
+
+wire [31:0] branch_predictor_target = is_branch ? branch_target : (is_jump ? jump_target : 32'b0);
+
+z_core_branch_pred branch_predictor(
+    .clk(clk),
+    .rstn(rstn),
+    .branch_taken(branch_taken || is_jump),
+    .is_branch(is_branch || is_jump),
+    .inst_addr_wr(id_ex_pc),
+    .branch_target_wr(branch_predictor_target),
+    .inst_addr_rd(PC),
+    .branch_taken_pred(branch_taken_pred),
+    .branch_target_pred(branch_target_pred)
+);
+
+// synthesis translate_on
+
+assign branch_target_misspredict = is_branch ? (id_ex_branch_target_pred != branch_target) : (is_jump ? (id_ex_branch_target_pred != jump_target) : 1'b0);
+
+
+wire jump_misspredict = (id_ex_branch_taken_pred_valid ^ is_jump);
+wire branch_misspredict = (branch_taken ^ id_ex_branch_taken_pred_valid);
+wire prediction_flush = (branch_taken & branch_target_misspredict) || (is_jump ? (jump_misspredict || branch_target_misspredict) : branch_misspredict);
+wire flush = prediction_flush || trap_enter_r || mret_in_ex;
 
 // Track if we need to squash the NEXT instruction entering id_ex
 // This is set when the CURRENT if_id contains a jump being decoded into id_ex
@@ -398,16 +587,24 @@ wire if_id_is_branch = if_id_valid && dec_is_branch;
 
 wire [31:0] branch_target = id_ex_pc + id_ex_imm;
 wire [31:0] jalr_target   = (fwd_rs1_data + id_ex_imm) & ~32'b1;
+wire [31:0] jump_target   = id_ex_is_jalr ? jalr_target : branch_target;
 
 // ##################################################
 //              PIPELINE STAGE: FETCH
 // ##################################################
 
-reg fetch_wait;
-reg [31:0] fetch_pc;  // Captures PC when fetch starts - used when fetch completes
-reg mem_op_pending;
-reg squash_now;  // Set when JAL/JALR just entered id_ex, to squash instruction after
-reg flush_r;     // Registered flush - set for one cycle after branch/jump detected
+// Cache address priority (Read Port): trap > MRET > redirection > normal PC
+assign instr_cache_address = trap_enter_r               ? csr_mtvec :
+                             mret_in_ex                 ? csr_mepc :
+                             (is_jump && flush)         ? jump_target :
+                             (id_ex_branch_taken_pred && flush) ? (id_ex_pc + 4) :
+                             (branch_taken && flush)    ? branch_target :
+                             PC;
+
+// New instruction arriving this cycle (from any source)
+wire new_instr_arriving = fetch_buffer_valid || // From Fetch Buffer
+                          (fetch_wait && mem_ready) || // From Memory
+                          (instr_cache_valid && instr_cache_cache_hit); // From I-Cache
 
 always @(posedge clk) begin
     if (~rstn) begin
@@ -417,74 +614,82 @@ always @(posedge clk) begin
         if_id_ir <= 32'h00000013;  // NOP
         if_id_pc <= 32'b0;
         if_id_valid <= 1'b0;
-        flush_r <= 1'b0;
+        if_id_branch_taken_pred <= 1'b0;
+        if_id_branch_target_pred <= 32'b0;
         fetch_buffer_valid <= 1'b0;
         fetch_buffer_ir <= 32'b0;
         fetch_buffer_pc <= 32'b0;
+        instr_cache_wen <= 1'b0;
     end else begin
+        instr_cache_wen <= 1'b0;
         if (flush) begin
             // Flush: invalidate IF/ID (delay slot) and redirect PC to target
-            // The delay slot is invalidated by if_id_valid=0
-            // Flush: invalidate IF/ID (delay slot) and redirect PC to target
+            perf_pipeline_flush <= perf_pipeline_flush + 1;
             if_id_valid <= 1'b0;
             if_id_ir <= 32'h00000013;
             // Also invalidate the fetch buffer to prevent stale instructions from being loaded
             fetch_buffer_valid <= 1'b0;
-            PC <= id_ex_is_jalr ? jalr_target : branch_target;
+            // PC redirect priority: trap > MRET > jump/branch misprediction
+            PC <= trap_enter_r           ? csr_mtvec :
+                  mret_in_ex             ? csr_mepc :
+                  is_jump                ? jump_target :
+                  id_ex_branch_taken_pred ? (id_ex_pc + 4) :
+                  branch_target;
             fetch_wait <= 1'b0;
-            flush_r <= 1'b1;  // Register that flush happened
-        end else begin
-            // Clear if_id_valid when instruction is consumed by decode stage
-            // (unless a new instruction is arriving to replace it)
-            // new_instr_from_buffer: !stall && fetch_buffer_valid
-            // new_instr_from_fetch: fetch_wait && mem_ready && !stall && !fetch_buffer_valid
-            if (!stall && if_id_valid && 
-                !(!stall && fetch_buffer_valid) && 
-                !(fetch_wait && mem_ready && !stall && !fetch_buffer_valid)) begin
-                // Instruction consumed by decode, no new instruction arriving
+        end else begin            
+            // Clear if_id_valid when consumed (unless new instruction arriving)
+            if (!stall && if_id_valid && !new_instr_arriving)
                 if_id_valid <= 1'b0;
-            end
             
-            // Move buffer to IF/ID if not stalled and buffer valid
             if (!stall && fetch_buffer_valid) begin
+                // Move buffer to IF/ID
                 if_id_ir <= fetch_buffer_ir;
                 if_id_pc <= fetch_buffer_pc;
                 if_id_valid <= 1'b1;
                 fetch_buffer_valid <= 1'b0;
-            end
-            
-            // Check if we can start a new fetch:
-            // 1. Not currently waiting for a fetch
-            // 2. Memory bus not busy with data access (mem_op_pending)
-            // 3. AXI master not busy (prevents overlap with cancelled fetch)
-            // 4. Either buffer is empty OR (buffer will be emptied this cycle because !stall)
-            // 5. EX stage does not need memory (prevent structural hazard)
-            if (!fetch_wait && !mem_op_pending && !mem_busy &&
-                !(ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)) && 
-                (!fetch_buffer_valid || !stall)) begin
-                 // Start fetch - capture the PC we're fetching from
-                 fetch_wait <= 1'b1;
-                 fetch_pc <= PC;  // Capture PC for this fetch
             end else if (fetch_wait && mem_ready) begin
                 // Fetch complete - use fetch_pc for the address, not current PC
+                perf_inst_fetch <= perf_inst_fetch + 1;
+                // Make branch prediction
+                if_id_branch_taken_pred <= branch_taken_pred;
+                if_id_branch_target_pred <= branch_target_pred;
+                // Write the new instruction to the cache
+                instr_cache_wen <= 1'b1;
+                instr_cache_data_in <= mem_rdata;
+
                 if (!stall && !fetch_buffer_valid) begin
                     // Pipeline active and buffer empty: load directly to IF/ID
                     if_id_ir <= mem_rdata;
-                    if_id_pc <= fetch_pc;  // Use the PC that was captured when fetch started
+                    if_id_pc <= fetch_pc;
                     if_id_valid <= 1'b1;
                 end else begin
                     // Pipeline stalled or buffer full: load to buffer
                     fetch_buffer_ir <= mem_rdata;
-                    fetch_buffer_pc <= fetch_pc;  // Use the PC that was captured when fetch started
+                    fetch_buffer_pc <= fetch_pc;
                     fetch_buffer_valid <= 1'b1;
                 end
                 
                 // Advance PC from the address we just fetched and clear flags
-                PC <= fetch_pc + 4;
+                PC <= branch_taken_pred ? branch_target_pred : fetch_pc + 4;
                 fetch_wait <= 1'b0;
+            end else if (!fetch_wait && !stall && (instr_cache_valid && instr_cache_cache_hit) && !fetch_buffer_valid) begin
+                // Cache hit: load instruction and advance PC
+                if_id_ir <= instr_cache_data_out;
+                if_id_pc <= instr_cache_address;
+                if_id_valid <= 1'b1;
+                PC <= branch_taken_pred ? branch_target_pred : PC + 4;
+                perf_inst_cache_hits <= perf_inst_cache_hits + 1;
+                // Make branch prediction
+                if_id_branch_taken_pred <= branch_taken_pred;
+                if_id_branch_target_pred <= branch_target_pred;
+            end else if (!fetch_wait && !mem_op_pending && !mem_busy &&
+                         !(ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)) && 
+                         (!fetch_buffer_valid || !stall) && 
+                         !instr_cache_valid && !instr_cache_cache_hit) begin
+                // Cache miss - start memory fetch
+                fetch_wait <= 1'b1;
+                fetch_pc <= PC;
             end
-            // Handle flush_r clearing (legacy from original code logic)
-            flush_r <= 1'b0;
         end
     end
 end
@@ -523,13 +728,26 @@ always @(posedge clk) begin
         id_ex_is_jalr <= 1'b0;
         id_ex_is_lui <= 1'b0;
         id_ex_is_auipc <= 1'b0;
-        id_ex_is_r_type <= 1'b0;
         id_ex_is_i_alu <= 1'b0;
         id_ex_is_div <= 1'b0;
         id_ex_reg_write <= 1'b0;
-        squash_now <= 1'b0;
-    end else if (flush || load_use_hazard) begin
-        // Insert bubble - flush handles current cycle squash
+        id_ex_branch_taken_pred <= 1'b0;
+        id_ex_branch_target_pred <= 32'b0;
+        id_ex_is_csr <= 1'b0;
+        id_ex_is_mret <= 1'b0;
+        id_ex_csr_addr <= 12'b0;
+        id_ex_csr_zimm <= 5'b0;
+        id_ex_is_ecall <= 1'b0;
+        id_ex_is_ebreak <= 1'b0;
+        id_ex_is_illegal <= 1'b0;
+        id_ex_ir <= 32'b0;
+    end else if (trap_enter_r || mret_in_ex || ((prediction_flush || load_use_hazard) && !ex_stall)) begin
+        // Insert bubble on flush or load-use hazard.
+        // prediction_flush is gated by !ex_stall: if the EX stage is stalled,
+        // the jump/branch result hasn't been latched into EX/MEM yet, so we
+        // must keep id_ex_valid until the stall clears to avoid losing rd writes.
+        // trap_enter_r and mret_in_ex always clear id_ex (trap gates ex_mem_valid
+        // independently via !trap_enter_r).
         id_ex_valid <= 1'b0;
         id_ex_reg_write <= 1'b0;
         id_ex_is_load <= 1'b0;
@@ -540,13 +758,13 @@ always @(posedge clk) begin
         id_ex_is_lui <= 1'b0;
         id_ex_is_auipc <= 1'b0;
         id_ex_is_div <= 1'b0;
-        // Set squash_now for delayed squash on next cycle
-        if (flush) squash_now <= 1'b1;
-    end else if (squash_now) begin
-        // Squash instruction that was in IF/ID when jump entered ID/EX
-        // Don't load if_id into id_ex, just invalidate
-        id_ex_valid <= 1'b0;
-        squash_now <= 1'b0;  // Clear after single use
+        id_ex_branch_taken_pred <= 1'b0;
+        id_ex_branch_target_pred <= 32'b0;
+        id_ex_is_csr <= 1'b0;
+        id_ex_is_mret <= 1'b0;
+        id_ex_is_ecall <= 1'b0;
+        id_ex_is_ebreak <= 1'b0;
+        id_ex_is_illegal <= 1'b0;
     end else if (!stall && if_id_valid) begin
         id_ex_pc <= if_id_pc;
         id_ex_rs1_data <= dec_fwd_rs1;
@@ -564,20 +782,22 @@ always @(posedge clk) begin
         id_ex_is_jalr <= dec_is_jalr;
         id_ex_is_lui <= dec_is_lui;
         id_ex_is_auipc <= dec_is_auipc;
-        id_ex_is_r_type <= dec_is_r_type;
         id_ex_is_i_alu <= dec_is_i_alu;
         id_ex_is_div <= dec_is_div;
+        id_ex_is_csr <= dec_is_csr;
+        id_ex_is_mret <= dec_is_mret;
+        id_ex_csr_addr <= dec_csr_addr;
+        id_ex_csr_zimm <= dec_csr_zimm;
+        id_ex_is_ecall <= dec_is_ecall;
+        id_ex_is_ebreak <= dec_is_ebreak;
+        id_ex_is_illegal <= dec_is_illegal;
+        id_ex_ir <= if_id_ir;
         id_ex_reg_write <= dec_reg_write;
+        id_ex_branch_taken_pred <= if_id_branch_taken_pred;
+        id_ex_branch_target_pred <= if_id_branch_target_pred;
         id_ex_valid <= 1'b1;
-        // Only set squash_now for JAL/JALR detected in if_id (unconditional jumps)
-        // Branch squash is handled by flush -> squash_now path
-        squash_now <= if_id_is_jump;
     end else if (!stall) begin
         id_ex_valid <= 1'b0;
-        squash_now <= 1'b0;
-    end else begin
-        // On stall, clear squash_now since we already handled it
-        squash_now <= 1'b0;
     end
 end
 
@@ -585,7 +805,8 @@ end
 //              PIPELINE STAGE: EXECUTE
 // ##################################################
 
-wire [31:0] ex_result = id_ex_is_lui   ? id_ex_imm :
+wire [31:0] ex_result = id_ex_is_csr   ? csr_read_data :    // CSR read (old value -> rd)
+                        id_ex_is_lui   ? id_ex_imm :
                         id_ex_is_auipc ? (id_ex_pc + id_ex_imm) :
                         (id_ex_is_jal || id_ex_is_jalr) ? (id_ex_pc + 4) :
                         id_ex_is_div ? div_final_result :
@@ -594,26 +815,26 @@ wire [31:0] ex_result = id_ex_is_lui   ? id_ex_imm :
 always @(posedge clk) begin
     if (~rstn) begin
         ex_mem_valid <= 1'b0;
-        ex_mem_pc <= 32'b0;
         ex_mem_alu_result <= 32'b0;
         ex_mem_rs2_data <= 32'b0;
         ex_mem_rd <= 5'b0;
         ex_mem_funct3 <= 3'b0;
         ex_mem_is_load <= 1'b0;
         ex_mem_is_store <= 1'b0;
-        ex_mem_is_div <= 1'b0;
         ex_mem_reg_write <= 1'b0;
     end else if (!mem_stall && !ex_stall) begin
-        ex_mem_pc <= id_ex_pc;
         ex_mem_alu_result <= ex_result;
         ex_mem_rs2_data <= fwd_rs2_data;
         ex_mem_rd <= id_ex_rd;
         ex_mem_funct3 <= id_ex_funct3;
         ex_mem_is_load <= id_ex_is_load;
         ex_mem_is_store <= id_ex_is_store;
-        ex_mem_is_div <= id_ex_is_div;
-        ex_mem_reg_write <= id_ex_reg_write && !id_ex_is_branch && !id_ex_is_store;
-        ex_mem_valid <= id_ex_valid && !id_ex_is_branch;
+        ex_mem_reg_write <= id_ex_reg_write && !id_ex_is_branch && !id_ex_is_store && !id_ex_is_mret
+                           && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !trap_enter_r
+                           && !misalign_load && !misalign_store && !misalign_branch && !misalign_jump;
+        ex_mem_valid <= id_ex_valid && !id_ex_is_branch && !id_ex_is_mret
+                        && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !trap_enter_r
+                        && !misalign_load && !misalign_store && !misalign_branch && !misalign_jump;
     end
 end
 
@@ -622,6 +843,7 @@ end
 // ##################################################
 
 // Combinational load data extraction from mem_rdata
+// Acts as a LSU (Load Store Unit)
 // This allows WB stage to use the correct data immediately
 reg [31:0] mem_load_data;
 always @* begin
@@ -662,12 +884,9 @@ always @(posedge clk) begin
         // - mem_busy is false (AXI bus available - either idle or just completed)
         // This allows stores to be queued while waiting for fetch to complete
         if (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending && !mem_busy) begin
-            // mem_addr assignment removed
-            // mem_wen assignment removed
-            // mem_req assignment removed
             mem_op_pending <= 1'b1;
-            
             if (ex_mem_is_store) begin
+                perf_memory_writes <= perf_memory_writes + 1;
                 case (ex_mem_funct3[1:0])
                     2'b00: begin
                         mem_data_out_r <= {4{ex_mem_rs2_data[7:0]}};
@@ -682,6 +901,8 @@ always @(posedge clk) begin
                         mem_wstrb_r <= 4'b1111;
                     end
                 endcase
+            end else if (ex_mem_is_load) begin
+                perf_memory_reads <= perf_memory_reads + 1;
             end
         end else if (mem_op_pending && mem_ready) begin
             mem_op_pending <= 1'b0;
@@ -697,14 +918,13 @@ always @(posedge clk) begin
     if (~rstn) begin
         mem_wb_valid <= 1'b0;
         mem_wb_result <= 32'b0;
-        mem_wb_pc <= 32'b0;
         mem_wb_rd <= 5'b0;
         mem_wb_reg_write <= 1'b0;
-    end else if (!mem_stall || (mem_op_pending && mem_ready)) begin
-        // NOTE: Use mem_stall not ex_stall here - div_stall should NOT block WB
-        // This allows instructions ahead of division to complete their writeback
+    end else if ((!mem_stall && !ex_stall) || (mem_op_pending && mem_ready)) begin
+        // Advance MEM/WB pipeline register when:
+        // 1. No stalls (neither memory nor EX stage stalled), OR
+        // 2. A memory operation just completed (even if stalled, we take the result)
         mem_wb_rd <= ex_mem_rd;
-        mem_wb_pc <= ex_mem_pc;
         mem_wb_reg_write <= ex_mem_reg_write && !ex_mem_is_store;
         mem_wb_valid <= ex_mem_valid && !ex_mem_is_store;
         
@@ -714,9 +934,86 @@ always @(posedge clk) begin
             mem_wb_result <= ex_mem_alu_result;
         end
     end else begin
+        // Stalled - insert bubble (don't retire any instruction)
         mem_wb_valid <= 1'b0;
-        mem_wb_reg_write <= 1'b0; // IMPORTANT: Must clear to prevent incorrect forwarding
-        mem_wb_rd <= 5'b0;        // Safer to clear destination too
+        mem_wb_reg_write <= 1'b0;
+        mem_wb_rd <= 5'b0;
+    end
+end
+
+// ##################################################
+//        INTERRUPT DETECTION & TRAP ENTRY
+// ##################################################
+//
+// Interrupt priority (§3.1.9): MEI (11) > MSI (3) > MTI (7)
+// Taken only when pipeline is not stalled and no flush in progress.
+
+reg [31:0] irq_cause;
+always @(*) begin
+    if (meip && csr_mie_meie)
+        irq_cause = {1'b1, 31'd11};  // Machine External Interrupt
+    else if (msip && csr_mie_msie)
+        irq_cause = {1'b1, 31'd3};   // Machine Software Interrupt
+    else
+        irq_cause = {1'b1, 31'd7};   // Machine Timer Interrupt
+end
+
+// mepc for interrupts: earliest valid instruction in the pipeline
+wire [31:0] trap_mepc_next = if_id_valid ? if_id_pc : PC;
+
+always @(posedge clk) begin
+    if (~rstn) begin
+        trap_enter_r  <= 1'b0;
+        trap_mepc_r   <= 32'b0;
+        trap_mcause_r <= 32'b0;
+        trap_mtval_r  <= 32'b0;
+    end else begin
+        trap_enter_r <= 1'b0;
+
+        // Synchronous exceptions (highest priority)
+        if (id_ex_valid && !trap_enter_r && !stall) begin
+            if (misalign_branch || misalign_jump) begin
+                trap_enter_r  <= 1'b1;
+                trap_mepc_r   <= id_ex_pc;
+                trap_mcause_r <= {1'b0, 31'd0};   // Instruction address misaligned
+                trap_mtval_r  <= misalign_branch ? branch_target : jump_target;
+            end else if (misalign_load) begin
+                trap_enter_r  <= 1'b1;
+                trap_mepc_r   <= id_ex_pc;
+                trap_mcause_r <= {1'b0, 31'd4};   // Load address misaligned
+                trap_mtval_r  <= alu_out;
+            end else if (misalign_store) begin
+                trap_enter_r  <= 1'b1;
+                trap_mepc_r   <= id_ex_pc;
+                trap_mcause_r <= {1'b0, 31'd6};   // Store/AMO address misaligned
+                trap_mtval_r  <= alu_out;
+            end else if (id_ex_is_illegal) begin
+                trap_enter_r  <= 1'b1;
+                trap_mepc_r   <= id_ex_pc;
+                trap_mcause_r <= {1'b0, 31'd2};   // Illegal instruction
+                trap_mtval_r  <= id_ex_ir;
+            end else if (id_ex_is_ecall) begin
+                trap_enter_r  <= 1'b1;
+                trap_mepc_r   <= id_ex_pc;
+                trap_mcause_r <= {1'b0, 31'd11};  // Environment call from M-mode
+                trap_mtval_r  <= 32'b0;
+            end else if (id_ex_is_ebreak) begin
+                trap_enter_r  <= 1'b1;
+                trap_mepc_r   <= id_ex_pc;
+                trap_mcause_r <= {1'b0, 31'd3};   // Breakpoint
+                trap_mtval_r  <= id_ex_pc;         // Spec: mtval = PC of ebreak
+            end
+        end
+
+        // Asynchronous interrupts (lower priority than exceptions)
+        if (csr_irq_pending && !flush && !stall && !trap_enter_r &&
+            !(id_ex_valid && (id_ex_is_illegal || id_ex_is_ecall || id_ex_is_ebreak ||
+                             misalign_branch || misalign_jump || misalign_load || misalign_store))) begin
+            trap_enter_r  <= 1'b1;
+            trap_mepc_r   <= trap_mepc_next;
+            trap_mcause_r <= irq_cause;
+            trap_mtval_r  <= 32'b0;
+        end
     end
 end
 
@@ -731,9 +1028,9 @@ localparam STATE_EXECUTE_b = 2;
 localparam STATE_MEM_b = 3;
 localparam STATE_WRITE_b = 4;
 
-reg [N_STATES-1:0] state;
+wire [N_STATES-1:0] state;
 
-// assign state = {mem_wb_valid, ex_mem_valid, id_ex_valid, if_id_valid, fetch_wait};
+assign state = {mem_wb_valid, ex_mem_valid, id_ex_valid, if_id_valid, fetch_wait | (instr_cache_valid && instr_cache_cache_hit)};
 
 // Unified Memory Request Logic (Arbiter)
 // mem_addr is defined as reg above but driven combinationally here.
@@ -752,6 +1049,29 @@ always @* begin
         mem_req_comb = 1'b0;
         mem_wen_comb = 1'b0;
         mem_addr = 32'b0;
+    end
+end
+
+// ##################################################
+//          PERFORMANCE COUNTERS CONTROL
+// ##################################################
+
+always @(posedge clk) begin
+    if (~rstn) begin
+        perf_cycle <= 64'd0;
+        perf_instret <= 64'd0;
+        perf_inst_cache_hits <= 64'd0;
+        perf_inst_fetch <= 64'd0;
+        perf_memory_reads <= 64'd0;
+        perf_memory_writes <= 64'd0;
+        perf_pipeline_flush <= 64'd0;
+    end else begin
+        perf_cycle <= perf_cycle + 1;
+        
+        // Count committed instructions (MEM/WB stage valid)
+        if (mem_wb_valid) begin
+            perf_instret <= perf_instret + 1;
+        end
     end
 end
 

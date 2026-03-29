@@ -24,7 +24,7 @@ The UART module provides serial communication accessible via the Z-Core processo
 | `uart_rx` | GPIO or USB-UART | Receive from PC |
 
 ### Default Configuration
-- **Baud Rate**: 9600
+- **Baud Rate**: 115200
 - **Data Bits**: 8
 - **Parity**: None
 - **Stop Bits**: 1
@@ -64,8 +64,8 @@ The UART module provides serial communication accessible via the Z-Core processo
 ```
 BAUD_DIV = clock_freq / (16 * baud_rate)
 
-For 50 MHz clock and 9600 baud:
-BAUD_DIV = 50000000 / (16 * 9600) ≈ 27
+For 50 MHz clock and 115200 baud:
+BAUD_DIV = 50000000 / (16 * 115200) ≈ 27
 ```
 
 ---
@@ -74,9 +74,9 @@ BAUD_DIV = 50000000 / (16 * 9600) ≈ 27
 
 | Peripheral | Base Address | Size |
 |------------|--------------|------|
-| Memory | `0x00000000` | 4 KB |
-| **UART** | `0x04000000` | 4 KB |
-| GPIO | `0x04001000` | 4 KB |
+| Block RAM  | `0x00000000` | 16 KB |
+| **UART**   | `0x04000000` | 4 KB |
+| GPIO       | `0x04001000` | 4 KB |
 
 ---
 
@@ -171,5 +171,5 @@ To communicate with the Z-Core via UART:
 
 ### Linux (minicom)
 ```bash
-minicom -D /dev/ttyUSB0 -b 9600
+minicom -D /dev/ttyUSB0 -b 115200
 ```

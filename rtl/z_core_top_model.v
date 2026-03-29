@@ -34,10 +34,14 @@ module z_core_top #(
     parameter DATA_WIDTH = 32,
     parameter ADDR_WIDTH = 32,
     parameter STRB_WIDTH = (DATA_WIDTH/8),
-    parameter MEM_ADDR_WIDTH = 12,      // 4KB memory
-    parameter N_GPIO = 64,
+    parameter MEM_ADDR_WIDTH = 14,      // 16KB memory
+    parameter N_GPIO = 16,
+	 parameter CACHE_DEPTH = 256,
     parameter PIPELINE_OUTPUT = 0,
-    parameter INIT_FILE = "software/game_test.hex"
+    parameter INIT_FILE_0 = "software/bootloader_byte0.mif",
+    parameter INIT_FILE_1 = "software/bootloader_byte1.mif",
+    parameter INIT_FILE_2 = "software/bootloader_byte2.mif",
+    parameter INIT_FILE_3 = "software/bootloader_byte3.mif"
 )(
     input wire MAX10_CLK1_50,
     //input wire rstn,
@@ -50,7 +54,17 @@ module z_core_top #(
     inout  wire [N_GPIO-1:0] gpio_pins,
 	 
 	 output [9:0] LEDR,
-	 input [1:0] KEY
+	 input [1:0] KEY,
+
+    // VGA
+    output [3:0] VGA_R,
+    output [3:0] VGA_G,
+    output [3:0] VGA_B,
+    output VGA_HS,
+    output VGA_VS,
+
+    // Timer External Event
+    input wire timer_ext_event_i
 );
 
 wire rstn = KEY[0];
@@ -64,8 +78,6 @@ always @(posedge clk) heartbeat <= heartbeat + 1;
 
 wire cpu_halt;
 
-
-
 // **************************************************
 //              AXI-Lite Interconnect Wires
 // **************************************************
@@ -78,24 +90,30 @@ wire cpu_halt;
 
 // Interconnect Parameters
 localparam S_COUNT = 1;
-localparam M_COUNT = 3;
+localparam M_COUNT = 5;
 localparam M_REGIONS = 1;
 
 // Address Map
-// M0: Memory (0x0000_0000 - 0x0000_0FFF) 4KB
+// M0: Memory (0x0000_0000 - 0x03FF_FFFF) 64MB
 // M1: UART   (0x0400_0000 - 0x0400_0FFF) 4KB
 // M2: GPIO   (0x0400_1000 - 0x0400_1FFF) 4KB
+// M3: Timer  (0x0400_2000 - 0x0400_2FFF) 4KB
+// M4: VGA    (0x0400_3000 - 0x0400_3FFF) 4KB
 
-localparam [M_COUNT*32-1:0] M_BASE_ADDR = {
+localparam [M_COUNT*ADDR_WIDTH-1:0] M_BASE_ADDR = {
+    32'h0400_3000, // M4: VGA
+    32'h0400_2000, // M3: Timer
     32'h0400_1000, // M2: GPIO
     32'h0400_0000, // M1: UART
     32'h0000_0000  // M0: Memory
 };
 
 localparam [M_COUNT*32-1:0] M_ADDR_WIDTH_CONF = {
-    32'd12, // M2: GPIO (4KB = 2^12)
-    32'd12, // M1: UART (4KB = 2^12)
-    32'd12  // M0: Memory (4KB = 2^12)
+    32'd12, // M4: VGA   (4KB = 2^12)
+    32'd12, // M3: Timer (4KB = 2^12)
+    32'd12, // M2: GPIO  (4KB = 2^12)
+    32'd12, // M1: UART  (4KB = 2^12)
+    32'd26  // M0: Memory (64MB = 2^26)
 };
 
 // Interconnect Wires
@@ -202,11 +220,11 @@ axil_interconnect #(
 z_core_control_u #(
     .DATA_WIDTH(DATA_WIDTH),
     .ADDR_WIDTH(ADDR_WIDTH),
-    .STRB_WIDTH(STRB_WIDTH)
+    .STRB_WIDTH(STRB_WIDTH),
+    .CACHE_DEPTH(CACHE_DEPTH)
 ) u_control_unit (
     .clk(clk),
     .rstn(rstn),
-    .halt(cpu_halt),
     
     // AXI-Lite Master Interface -> Interconnect Slave 0
     .m_axil_awaddr(s_axil_awaddr),
@@ -227,7 +245,12 @@ z_core_control_u #(
     .m_axil_rdata(s_axil_rdata),
     .m_axil_rresp(s_axil_rresp),
     .m_axil_rvalid(s_axil_rvalid),
-    .m_axil_rready(s_axil_rready)
+    .m_axil_rready(s_axil_rready),
+
+    // Interrupt Inputs (directly wired)
+    .meip(1'b0),    // Machine External Interrupt - connect to external interrupt controller
+    .mtip(timer_irq), // Machine Timer Interrupt - Connected to timer peripheral
+    .msip(1'b0)     // Machine Software Interrupt - connect to software interrupt source
 );
 
 
@@ -237,16 +260,19 @@ z_core_control_u #(
 
 axil_ram #(
     .DATA_WIDTH(DATA_WIDTH),
-    .ADDR_WIDTH(12), // 4KB
+    .ADDR_WIDTH(MEM_ADDR_WIDTH),
     .STRB_WIDTH(STRB_WIDTH),
     .PIPELINE_OUTPUT(PIPELINE_OUTPUT),
-    .INIT_FILE(INIT_FILE)
+    .INIT_FILE_0(INIT_FILE_0),
+    .INIT_FILE_1(INIT_FILE_1),
+    .INIT_FILE_2(INIT_FILE_2),
+    .INIT_FILE_3(INIT_FILE_3)
 ) u_memory (
     .clk(clk),
     .rstn(rstn),
     
     // AXI-Lite Slave Interface <- Interconnect Master 0
-    .s_axil_awaddr(m_axil_awaddr[0*ADDR_WIDTH +: 12]), // Truncate to local size
+    .s_axil_awaddr(m_axil_awaddr[0*ADDR_WIDTH +: MEM_ADDR_WIDTH]),
     .s_axil_awprot(m_axil_awprot[0*3 +: 3]),
     .s_axil_awvalid(m_axil_awvalid[0]),
     .s_axil_awready(m_axil_awready[0]),
@@ -257,7 +283,7 @@ axil_ram #(
     .s_axil_bresp(m_axil_bresp[0*2 +: 2]),
     .s_axil_bvalid(m_axil_bvalid[0]),
     .s_axil_bready(m_axil_bready[0]),
-    .s_axil_araddr(m_axil_araddr[0*ADDR_WIDTH +: 12]), // Truncate to local size
+    .s_axil_araddr(m_axil_araddr[0*ADDR_WIDTH +: MEM_ADDR_WIDTH]),
     .s_axil_arprot(m_axil_arprot[0*3 +: 3]),
     .s_axil_arvalid(m_axil_arvalid[0]),
     .s_axil_arready(m_axil_arready[0]),
@@ -344,14 +370,88 @@ axil_gpio #(
     .gpio(gpio_pins)
 );
 
+// **************************************************
+//              Timer (Slave 3)
+// **************************************************
 
+axil_timer #(
+    .DATA_WIDTH(DATA_WIDTH),
+    .ADDR_WIDTH(12), // 4KB
+    .STRB_WIDTH(STRB_WIDTH)
+) u_timer (
+    .clk(clk),
+    .rstn(rstn), // Active low reset
+    .ext_event_i(timer_ext_event_i), // External event for Counter Mode
+    
+    .s_axil_awaddr(m_axil_awaddr[3*ADDR_WIDTH +: 12]),
+    .s_axil_awprot(m_axil_awprot[3*3 +: 3]),
+    .s_axil_awvalid(m_axil_awvalid[3]),
+    .s_axil_awready(m_axil_awready[3]),
+    .s_axil_wdata(m_axil_wdata[3*DATA_WIDTH +: DATA_WIDTH]),
+    .s_axil_wstrb(m_axil_wstrb[3*STRB_WIDTH +: STRB_WIDTH]),
+    .s_axil_wvalid(m_axil_wvalid[3]),
+    .s_axil_wready(m_axil_wready[3]),
+    .s_axil_bresp(m_axil_bresp[3*2 +: 2]),
+    .s_axil_bvalid(m_axil_bvalid[3]),
+    .s_axil_bready(m_axil_bready[3]),
+    .s_axil_araddr(m_axil_araddr[3*ADDR_WIDTH +: 12]),
+    .s_axil_arprot(m_axil_arprot[3*3 +: 3]),
+    .s_axil_arvalid(m_axil_arvalid[3]),
+    .s_axil_arready(m_axil_arready[3]),
+    .s_axil_rdata(m_axil_rdata[3*DATA_WIDTH +: DATA_WIDTH]),
+    .s_axil_rresp(m_axil_rresp[3*2 +: 2]),
+    .s_axil_rvalid(m_axil_rvalid[3]),
+    .s_axil_rready(m_axil_rready[3]),
 
+    // Timer compare-match interrupt -> wired to core mtip
+    .timer_irq_o(timer_irq)
+);
 
+// **************************************************
+//              VGA (Slave 4)
+// **************************************************
+
+axil_vga #(
+    .DATA_WIDTH(DATA_WIDTH),
+    .ADDR_WIDTH(12),
+    .STRB_WIDTH(STRB_WIDTH)
+) u_vga (
+    .clk(clk),
+    .rst(~rstn),
+
+    .s_axil_awaddr(m_axil_awaddr[4*ADDR_WIDTH +: 12]),
+    .s_axil_awprot(m_axil_awprot[4*3 +: 3]),
+    .s_axil_awvalid(m_axil_awvalid[4]),
+    .s_axil_awready(m_axil_awready[4]),
+    .s_axil_wdata(m_axil_wdata[4*DATA_WIDTH +: DATA_WIDTH]),
+    .s_axil_wstrb(m_axil_wstrb[4*STRB_WIDTH +: STRB_WIDTH]),
+    .s_axil_wvalid(m_axil_wvalid[4]),
+    .s_axil_wready(m_axil_wready[4]),
+    .s_axil_bresp(m_axil_bresp[4*2 +: 2]),
+    .s_axil_bvalid(m_axil_bvalid[4]),
+    .s_axil_bready(m_axil_bready[4]),
+    .s_axil_araddr(m_axil_araddr[4*ADDR_WIDTH +: 12]),
+    .s_axil_arprot(m_axil_arprot[4*3 +: 3]),
+    .s_axil_arvalid(m_axil_arvalid[4]),
+    .s_axil_arready(m_axil_arready[4]),
+    .s_axil_rdata(m_axil_rdata[4*DATA_WIDTH +: DATA_WIDTH]),
+    .s_axil_rresp(m_axil_rresp[4*2 +: 2]),
+    .s_axil_rvalid(m_axil_rvalid[4]),
+    .s_axil_rready(m_axil_rready[4]),
+
+    .vga_r(VGA_R),
+    .vga_g(VGA_G),
+    .vga_b(VGA_B),
+    .vga_hs(VGA_HS),
+    .vga_vs(VGA_VS)
+);
 
 
 assign LEDR[7:0] = gpio_pins[7:0];
 //assign LEDR[8] = s_axil_arvalid;  // Instr Fetch Active
 assign LEDR[8] = uart_tx;  // Data Write Active
 assign LEDR[9] = heartbeat[25];      // Heartbeat
+
+wire timer_irq;
 
 endmodule

@@ -12,7 +12,7 @@ The GPIO module provides bidirectional General Purpose Input/Output pins accessi
 
 | GPIO Pins | DE10-Lite Component | Direction |
 |-----------|---------------------|-----------|
-| `GPIO[7:0]` | `GPIO[7:0]` | Output |
+| `GPIO[15:0]` | `GPIO[15:0]` | Bidirectional |
 
 You can also configure the GPIOs to control the LEDs and switches on the DE10-Lite board.
 
@@ -46,10 +46,8 @@ uint32_t switches = (*(volatile uint32_t*)0x04001000 >> 8) & 0xFF;
 
 | Offset | Name | Description | Access |
 |--------|------|-------------|--------|
-| `0x00` | DATA_LOW | GPIO[31:0] data | R/W |
-| `0x04` | DATA_HIGH | GPIO[63:32] data | R/W |
-| `0x08` | DIR_LOW | GPIO[31:0] direction | R/W |
-| `0x0C` | DIR_HIGH | GPIO[63:32] direction | R/W |
+| `0x00` | DATA | GPIO[15:0] data | R/W |
+| `0x04` | DIR  | GPIO[15:0] direction | R/W |
 
 ### DATA Registers (0x00, 0x04)
 - **Write**: Sets the output value for pins configured as outputs
@@ -65,9 +63,9 @@ uint32_t switches = (*(volatile uint32_t*)0x04001000 >> 8) & 0xFF;
 
 | Peripheral | Base Address | Size |
 |------------|--------------|------|
-| Memory | `0x00000000` | 4 KB |
-| UART | `0x04000000` | 4 KB |
-| **GPIO** | `0x04001000` | 4 KB |
+| Block RAM  | `0x00000000` | 16 KB |
+| UART       | `0x04000000` | 4 KB |
+| **GPIO**   | `0x04001000` | 4 KB |
 
 ---
 
@@ -79,7 +77,7 @@ uint32_t switches = (*(volatile uint32_t*)0x04001000 >> 8) & 0xFF;
 #include <stdint.h>
 
 #define GPIO_DATA (*(volatile uint32_t*)0x04001000)
-#define GPIO_DIR  (*(volatile uint32_t*)0x04001008)
+#define GPIO_DIR  (*(volatile uint32_t*)0x04001004)
 
 void main() {
     // Configure GPIO[7:0] as outputs

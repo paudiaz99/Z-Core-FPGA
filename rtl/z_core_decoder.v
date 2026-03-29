@@ -34,7 +34,9 @@ module z_core_decoder (
     output [31:0] Bimm,
     output [31:0] Jimm,
     output [2:0] funct3,
-    output [6:0] funct7
+    output [6:0] funct7,
+    output [11:0] csr_addr,
+    output [4:0]  csr_zimm
 );
 
     // Decode Operation
@@ -48,6 +50,10 @@ module z_core_decoder (
     // Decode Funct
     assign funct3 = inst[14:12];
     assign funct7 = inst[31:25];
+
+    // Decode CSR fields (Zicsr)
+    assign csr_addr = inst[31:20];
+    assign csr_zimm = inst[19:15];
 
     // Decode Immediates
     // I-type: imm[11:0] = inst[31:20], sign-extended

@@ -27,13 +27,12 @@ SOFTWARE.
 //    8N1 Format: 8 data bits, no parity, 1 stop bit
 // **************************************************
 
-`timescale 1ns / 1ps
 
 module axil_uart #(
     parameter DATA_WIDTH = 32,
     parameter ADDR_WIDTH = 12,
     parameter STRB_WIDTH = (DATA_WIDTH/8),
-    parameter DEFAULT_BAUD_DIV = 16'd326  // 50MHz / (16 * 9600) = 326 for 9600 baud
+    parameter DEFAULT_BAUD_DIV = 16'd326  // 50MHz / (16 * 9600) = 326
 )(
     input  wire                   clk,
     input  wire                   rst,
@@ -223,6 +222,9 @@ reg [3:0] rx_sample_count;
 reg [7:0] rx_shift_reg;
 reg [2:0] rx_sync;  // Synchronizer for rx input
 
+// Clear rx_valid when software reads the RX_DATA register
+wire rx_data_rd = s_axil_rready && s_axil_rvalid_reg && (read_addr_reg[4:2] == 3'b001);
+
 // Synchronize rx input
 always @(posedge clk) begin
     if (rst) begin
@@ -244,6 +246,11 @@ always @(posedge clk) begin
         rx_valid <= 1'b0;
         rx_error <= 1'b0;
     end else begin
+        // Clear rx_valid on RX_DATA read (last-write-wins if new byte arrives same cycle)
+        if (rx_data_rd) begin
+            rx_valid <= 1'b0;
+        end
+
         if (baud_tick && rx_en) begin
             case (rx_state)
                 RX_IDLE: begin
@@ -435,16 +442,6 @@ always @(posedge clk) begin
                 // For simplicity, we clear it here
             end
         end
-    end
-end
-
-// Clear rx_valid after RX_DATA read
-always @(posedge clk) begin
-    if (rst) begin
-        // rx_valid cleared in main RX FSM
-    end else if (s_axil_rready && s_axil_rvalid_reg && read_addr_reg[4:2] == 3'b001) begin
-        // rx_valid will be set again by RX FSM when new data arrives
-        // This is handled in the RX FSM
     end
 end
 

@@ -1,24 +1,3 @@
-# Copyright (c) 2025 Pau Díaz Cuesta
-
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-
 # ================================================================
 # Makefile for Z-Core RISC-V Programs
 # ================================================================
@@ -33,10 +12,16 @@ OBJDUMP = $(PREFIX)objdump
 SIZE = $(PREFIX)size
 
 # Compiler Flags
-ARCH = -march=rv32im -mabi=ilp32
+ARCH = -march=rv32im_zicsr -mabi=ilp32
 CFLAGS = $(ARCH) -O2 -Wall -Wextra -ffreestanding -nostdlib
 ASFLAGS = $(ARCH)
+
+# Use linker_app.ld when building for bootloader upload (make APP=1 hello.bin)
+ifdef APP
+LDFLAGS = -T linker_app.ld
+else
 LDFLAGS = -T linker.ld
+endif
 
 # Source files
 SRCS = $(wildcard *.c)
@@ -45,6 +30,7 @@ PROGS = $(filter-out uart,$(SRCS:.c=))
 # Output files lists
 BINS = $(PROGS:=.bin)
 HEXS = $(PROGS:=.hex)
+MIFS = $(PROGS:=.mif)
 ASMS = $(PROGS:=.s)
 LSTS = $(PROGS:=.lst)
 ELFS = $(PROGS:=.elf)
@@ -56,7 +42,11 @@ MAPS = $(PROGS:=.map)
 
 .PHONY: all clean info
 
-all: $(BINS) $(HEXS) $(ASMS) $(LSTS) info
+all: $(BINS) $(HEXS) $(MIFS) $(ASMS) $(LSTS) info
+
+# Update: uart is now in libs/
+UART_DIR = libs
+CFLAGS += -I$(UART_DIR)
 
 # Link
 %.elf: %.o uart.o start.o linker.ld
@@ -71,7 +61,12 @@ all: $(BINS) $(HEXS) $(ASMS) $(LSTS) info
 # Generate hex file (Verilog format)
 %.hex: %.elf
 	@echo "Creating hex file $@..."
-	$(OBJCOPY) -O verilog $< $@
+	python3 elf2hex.py $< $@ 4096
+
+# Generate mif file (Quartus format)
+%.mif: %.elf
+	@echo "Creating mif file $@..."
+	python3 elf2hex.py $< $@ 4096
 
 # Generate assembly file from C source
 %.s: %.c
@@ -86,6 +81,11 @@ all: $(BINS) $(HEXS) $(ASMS) $(LSTS) info
 # Compile C files
 %.o: %.c
 	@echo "Compiling $<..."
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Compile UART from libs
+uart.o: $(UART_DIR)/uart.c
+	@echo "Compiling UART..."
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Assemble assembly files
@@ -105,4 +105,4 @@ info: $(ELFS)
 # Clean build artifacts
 clean:
 	@echo "Cleaning..."
-	rm -f *.o *.elf *.bin *.hex *.s *.lst *.map
+	rm -f *.o *.elf *.bin *.hex *.mif *.s *.lst *.map

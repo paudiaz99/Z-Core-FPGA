@@ -25,31 +25,9 @@ SOFTWARE.
 module z_core_alu (
     input [31:0] alu_in1,
     input [31:0] alu_in2,
-    input [3:0] alu_inst_type,
-    output reg [31:0] alu_out,
+    input [4:0] alu_inst_type,
+    output [31:0] alu_out,
     output reg alu_branch
-);
-
-// ##################################################
-//       MULTIPLIER UNIT (uses z_core_mult_unit)
-// ##################################################
-
-wire [63:0] multiplier_result;
-
-// Signedness control for RISC-V M extension:
-// MUL:    don't care (lower 32 bits same for all)
-// MULH:   signed × signed (both signed)
-// MULHSU: signed × unsigned (op1 signed, op2 unsigned)
-// MULHU:  unsigned × unsigned (both unsigned)
-wire mul_op1_signed = (alu_inst_type == INST_MULH) || (alu_inst_type == INST_MULHSU);
-wire mul_op2_signed = (alu_inst_type == INST_MULH);
-
-z_core_mult_unit mult_unit (
-    .op1(alu_in1),
-    .op2(alu_in2),
-    .op1_signed(mul_op1_signed),
-    .op2_signed(mul_op2_signed),
-    .result(multiplier_result)
 );
 
 // Instructions
@@ -73,6 +51,29 @@ localparam INST_MUL = 5'd16;
 localparam INST_MULH = 5'd17;
 localparam INST_MULHSU = 5'd18;
 localparam INST_MULHU = 5'd19;
+
+// ##################################################
+//       MULTIPLIER UNIT (uses z_core_mult_unit)
+// ##################################################
+
+wire [63:0] multiplier_result;
+
+// Signedness control for RISC-V M extension:
+// MUL:    don't care (lower 32 bits same for all)
+// MULH:   signed × signed (both signed)
+// MULHSU: signed × unsigned (op1 signed, op2 unsigned)
+// MULHU:  unsigned × unsigned (both unsigned)
+wire mul_op1_signed = (alu_inst_type == INST_MULH) || (alu_inst_type == INST_MULHSU);
+wire mul_op2_signed = (alu_inst_type == INST_MULH);
+
+z_core_mult_unit mult_unit (
+    .op1(alu_in1),
+    .op2(alu_in2),
+    .op1_signed(mul_op1_signed),
+    .op2_signed(mul_op2_signed),
+    .result(multiplier_result)
+);
+
 
 // ##################################################
 //       ALU Result - Continuous Assignment Mux

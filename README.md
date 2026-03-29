@@ -28,7 +28,18 @@
 
 ## Overview
 
-This repository contains the FPGA implementation of the Z-Core v0.2.0-alpha RISC-V RV32IM processor, targeting the Intel DE10-Lite development board.
+This repository contains the FPGA implementation of the Z-Core RISC-V RV32IMZicsr processor, targeting the Intel DE10-Lite development board. It includes a VGA Controller to display a toy example (vga_test.c), space invaders game (space.c),
+or whatever you can think of :D.
+
+---
+
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/72eb1558-ab39-4f42-9cb9-ddd9adee80e5" alt="centered image">
+  <br>
+  <sup>Z-Core Running VGA Test @ 60 FPS.</sup>
+</div>
+
+---
 
 ### Key Specifications
 
@@ -36,8 +47,9 @@ This repository contains the FPGA implementation of the Z-Core v0.2.0-alpha RISC
 |-----------|-------|
 | Target FPGA | Intel MAX 10 (10M50DAF484C7G) |
 | Operating Frequency | 50 MHz |
-| Program Memory | 4 KB Block RAM |
-| Peripherals | UART (9600 baud), GPIO |
+| ISA        | RV32IM + Zicsr |
+| Features   | Instruction Cache, Branch Predictor |
+| Peripherals | UART, GPIO, VGA (160x120), 64-bit Timer |
 | Development Board | Terasic DE10-Lite |
 
 ---
@@ -125,9 +137,11 @@ The Game will also display the score on the LEDs connected to GPIOs [7:0].
 
 | Address Range | Peripheral | Size |
 |---------------|------------|------|
-| `0x0000_0000` - `0x0000_0FFF` | Block RAM | 4 KB |
+| `0x0000_0000` - `0x0000_3FFF` | Block RAM (Boot + App) | 16 KB |
 | `0x0400_0000` - `0x0400_0FFF` | UART | 4 KB |
 | `0x0400_1000` - `0x0400_1FFF` | GPIO | 4 KB |
+| `0x0400_2000` - `0x0400_2FFF` | Timer | 4 KB |
+| `0x0400_3000` - `0x0400_3FFF` | VGA | 4 KB |
 
 > [!IMPORTANT]
 > **Memory Limitation**: The system uses **4 KB** of on-chip Block RAM for program memory, not the external SDRAM (64 MB). Programs must fit within this limit. Increase `ADDR_WIDTH` in `axil_ram` instantiation for larger memory.
@@ -145,17 +159,17 @@ The capability of using the 64MB SDRAM will be added in the future.
 │   ├── z_core_alu_ctrl.v      # ALU Control Unit
 │   ├── z_core_decoder.v       # Instruction Decoder
 │   ├── z_core_reg_file.v      # General Purpose Registers
-│   ├── z_core_mult_unit.v      # General Purpose Registers
-│   ├── z_core_mult_tree.v      # General Purpose Registers
-│   ├── z_core_mult_synth.v      # General Purpose Registers
-│   ├── z_core_div_unit.v      # General Purpose Registers
+│   ├── z_core_csr_file.v      # CSR File (Zicsr)
+│   ├── z_core_instr_cache.v   # Instruction Cache
+│   ├── z_core_branch_pred.v   # Branch Predictor
+│   ├── z_core_mult_unit.v     # Multiplier Unit
+│   ├── z_core_div_unit.v      # Division Unit
 │   ├── axil_interconnect.v    # AXI-Lite Bus Interconnect
-│   ├── axil_master.v          # AXI-Lite Master Interface
-│   ├── priority_encoder.v     # Priority Encoder
-│   ├── axi_mem.v              # AXI-Lite RAM (4KB Block RAM)
+│   ├── axil_timer.v           # 64-bit Timer Peripheral
+│   ├── axil_vga.v             # VGA Controller Peripheral
 │   ├── axil_uart.v            # UART Peripheral
 │   ├── axil_gpio.v            # GPIO Peripheral
-│   └── arbiter.v              # Bus Arbiter logic
+│   └── axi_mem.v              # AXI-Lite RAM Interface
 │
 ├── software/                   # Example programs and tools
 │   ├── libs/                  # Libraries
@@ -209,6 +223,8 @@ The capability of using the 64MB SDRAM will be added in the future.
 | [FPGA_DEPLOYMENT.md](doc/FPGA_DEPLOYMENT.md) | Complete deployment guide |
 | [GPIO.md](doc/GPIO.md) | LED and switch interfacing |
 | [UART.md](doc/UART.md) | Serial communication |
+| [VGA.md](doc/VGA.md) | VGA controller and API |
+| [TIMER.md](doc/TIMER.md) | 64-bit Timer and API |
 
 ---
 
