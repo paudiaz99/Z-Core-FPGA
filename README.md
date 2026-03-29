@@ -123,10 +123,12 @@ The software is located in the `software/` directory. It contains multiple examp
 ### Examples
 
 - `hello`: A simple "Hello, World!" program. Sends messages via UART.
-- `led_test`: A program that blinks the LEDs on the DE10-Lite board.
-- `gpio_test`: A program that tests the GPIO functionality of the Z-Core processor.
-- `game_test`: A program that implements a simple Pong game through UART (Isn't it fun? :D).
-- `multiplication`: A program that implements a test for the RV32IM instruction set and sends the results via UART. 
+- `led_test`: A program that blinks the 10 LEDs on the DE10-Lite board.
+- `gpio_test`: A program that tests the GPIO functionality.
+- `pong`: Classic Pong game rendered via UART.
+- `vga_test`: Displays color bars and a bouncing square via VGA.
+- `space`: "Star Assault" space shooter game for VGA.
+- `multiplication`: Test suite for the RV32IM multiplication/division instructions.
 
 ### Pong Game Setup
 
@@ -180,9 +182,7 @@ The capability of using the 64MB SDRAM will be added in the future.
 │   ├── z_core_csr_file.v      # CSR File (Zicsr)
 │   ├── z_core_instr_cache.v   # Instruction Cache
 │   ├── z_core_branch_pred.v   # Branch Predictor
-│   ├── z_core_mult_unit.v     # Multiplication Unit
-│   ├── z_core_mult_tree.v     # Wallace Tree Multiplier
-│   ├── z_core_mult_synth.v    # Synthesizable Multiplier Wrapper
+│   ├── z_core_mult_unit.v     # Multiplier Unit
 │   ├── z_core_div_unit.v      # Division Unit
 │   ├── axil_interconnect.v    # AXI-Lite Bus Interconnect
 │   ├── axil_timer.v           # 64-bit Timer Peripheral
@@ -190,32 +190,43 @@ The capability of using the 64MB SDRAM will be added in the future.
 │   ├── axil_uart.v            # UART Peripheral
 │   ├── axil_gpio.v            # GPIO Peripheral
 │   ├── axil_master.v          # AXI-Lite Master Interface
-│   └── axi_mem.v              # AXI-Lite RAM Interface
+│   ├── axi_mem.v              # AXI-Lite RAM Interface
+│   └── flist.vc               # File list for synthesis
 │
 ├── software/                   # Example programs and tools
+│   ├── bootloader/            # M9K Initial Bootloader
+│   │    ├── bootloader.c          # Bootloader source
+│   │    ├── Makefile              # Bootloader build system
+│   │    └── linker_boot.ld        # Bootloader-specific linker
 │   ├── libs/                  # Libraries
-│   │    ├── uart.c                # UART Library (.c file)
-│   │    └── uart.h                # UART Library (.h file)
-│   ├── hello.c                # Main example application
-│   ├── led_test.c             # LED peripheral test
-│   ├── gpio_test.c            # GPIO peripheral test
-│   ├── vga_test.c             # VGA peripheral test
-│   ├── pong.c                 # Pong Game
-│   ├── space.c       # Space Invaders Game
-│   ├── multiplication.c       # Multiplication test
+│   │    ├── uart.c                # UART Library
+│   │    ├── uart.h                # UART header
+│   │    └── vga.h                 # VGA header-only library
+│   ├── hello.c                # UART Hello World
+│   ├── led_test.c             # LED blink example
+│   ├── gpio_test.c            # GPIO logic test
+│   ├── vga_test.c             # VGA color bars & animation
+│   ├── pong.c                 # UART Pong game
+│   ├── space.c                # VGA Space shooter
+│   ├── multiplication.c       # RV32IM instruction test
 │   ├── start.S                # RISC-V Startup code
-│   ├── linker.ld              # Linker script
+│   ├── linker.ld              # Main linker script
+│   ├── linker_app.ld          # Application linker (origin 0x1000)
 │   ├── Makefile               # GNU Make build system
-│   ├── hex_gen.sh             # Compiler and HEX generation script
-│   └── elf2hex.py             # HEX generation utility
+│   ├── upload.py              # UART bootloader client
+│   ├── hex_gen.sh             # Build helper script
+│   └── elf2hex.py             # HEX/MIF generation utility
 │
 ├── doc/                        # Documentation
-│   ├── FPGA_DEPLOYMENT.md     # Detailed deployment guide
+│   ├── FPGA_DEPLOYMENT.md     # Complete deployment guide
 │   ├── GPIO.md                # LED/Switch interfacing
-│   └── UART.md                # Serial communication
+│   ├── UART.md                # Serial communication
+│   ├── VGA.md                 # VGA controller and API
+│   └── TIMER.md               # 64-bit Timer and API
 │
 ├── Z-Core.qsf                  # Quartus Pin Assignments
-└── Z-Core.sdc                  # Timing Constraints
+├── Z-Core.sdc                  # Timing Constraints
+└── LICENSE                     # MIT License
 ```
 
 ---
