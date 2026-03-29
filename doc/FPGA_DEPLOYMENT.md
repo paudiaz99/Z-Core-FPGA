@@ -10,11 +10,10 @@ A comprehensive guide for compiling, linking, and deploying RV32IM software on t
 2. [Prerequisites](#prerequisites)
 3. [Software Toolchain](#software-toolchain)
 4. [The Linker: Memory Layout and Executable Generation](#the-linker-memory-layout-and-executable-generation)
-5. [HEX File Format and Memory Initialization](#hex-file-format-and-memory-initialization)
-6. [Compilation Workflow](#compilation-workflow)
-7. [FPGA Synthesis and Deployment](#fpga-synthesis-and-deployment)
-8. [Troubleshooting](#troubleshooting)
-9. [References](#references)
+5. [The Bootloader Flow (Fast)](#the-bootloader-flow-fast)
+6. [The Bootloader Update Flow (Slow)](#the-bootloader-update-flow-slow)
+7. [Troubleshooting](#troubleshooting)
+8. [References](#references)
 
 ---
 
@@ -94,10 +93,9 @@ Before deploying code to Z-Core, ensure the following are installed and accessib
 
 | Tool                     | Purpose                                | Installation                              |
 |--------------------------|----------------------------------------|-------------------------------------------|
-| **RISC-V GNU Toolchain** | Cross-compilation for RV32IM           | [riscv-gnu-toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain) |
-| **Python 3.x**           | ELF-to-HEX conversion script           | [python.org](https://www.python.org/)     |
+| **RISC-V GNU Toolchain** | Cross-compilation for RV32IMZicsr      | [riscv-gnu-toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain) |
+| **Python 3.x**           | Bootloader upload and MIF generation   | [python.org](https://www.python.org/)     |
 | **Intel Quartus Prime**  | FPGA synthesis and programming         | [Intel FPGA](https://www.intel.com/fpga)  |
-| **PowerShell** or **Bash** | Build script execution               | Pre-installed on Windows/Linux            |
 
 ### RISC-V Toolchain Configuration
 
@@ -359,9 +357,9 @@ _loop:
 
 ---
 
-## HEX File Format and Memory Initialization
+## Memory Initialization (MIF)
 
-After linking, the ELF executable must be converted to a format that Verilog's `$readmemh` can understand for block RAM initialization.
+The processor's instruction memory is initialized during FPGA synthesis. While applications are uploaded via UART, the initial bootloader is baked into the bitstream using a Memory Initialization File (`.mif`).
 
 ### Compilation to HEX Pipeline
 
@@ -461,182 +459,71 @@ axil_ram #(
 
 ---
 
-## Compilation Workflow
+## Deployment Flow: Bootloader vs Hardware
 
-### Manual Compilation Steps
+Z-Core uses a bootloader-based deployment strategy to minimize the need for slow FPGA recompilations.
 
-```bash
-# 1. Navigate to software directory
-cd software
-
-# 2. Assemble startup code
-riscv64-unknown-elf-gcc -march=rv32im -mabi=ilp32 -c start.S -o start.o
-
-# 3. Compile C source
-riscv64-unknown-elf-gcc -march=rv32im -mabi=ilp32 -O2 \
-    -ffreestanding -nostdlib -c hello.c -o hello.o
-
-# 4. Link into ELF executable
-riscv64-unknown-elf-ld -T linker.ld -Map=hello.map hello.o start.o -o hello.elf
-
-# 5. Generate disassembly listing (optional, for debugging)
-riscv64-unknown-elf-objdump -d -S hello.elf > hello.lst
-
-# 6. Convert to HEX
-python elf2hex.py hello.elf hello.hex
-
-# 7. Verify size (must fit in 4 KB = 1024 words)
-riscv64-unknown-elf-size hello.elf
-```
-
-### Using the Build Script (Bash)
-
-```bash
-cd software
-./hex_gen.sh -Target hello
-```
-
-### Using the Makefile
-
-```bash
-cd software
-make              # Build all programs
-make clean        # Remove build artifacts
-```
-
-### Verifying the Build
-
-After compilation, check that the binary fits within the 4 KB memory:
-
-```bash
-$ riscv64-unknown-elf-size hello.elf
-   text    data     bss     dec     hex filename
-    720       0       0     720     2d0 hello.elf
-```
-
-> [!CAUTION]
-> If `text + data + bss > 4096 bytes`, the program will not fit in block RAM and will cause unpredictable behavior. Either reduce program size or increase `ADDR_WIDTH` in `axil_ram` instantiation.
-
----
-
-## FPGA Synthesis and Deployment
-
-### Synthesis Flow
-
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Verilog RTL    │ ──▶ │  Analysis &     │ ──▶ │    Fitter       │
-│  + HEX File     │     │  Synthesis      │     │  (Place & Route)│
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-                                                        │
-                                                        ▼
-                        ┌─────────────────┐     ┌─────────────────┐
-                        │  Program FPGA   │ ◀── │  Timing Analysis│
-                        │  (.sof/.pof)    │     │  (.sdc)         │
-                        └─────────────────┘     └─────────────────┘
-```
-
-### Step-by-Step Deployment
-
-1. **Compile Software**
-   ```bash
-   cd software
-   ./hex_gen.sh -Target hello
-   ```
-
-2. **Verify HEX File Exists**
-   ```bash
-   ls software/*.hex
-   ```
-
-3. **Open Quartus Project**
-
-4. **Set Memory Initialization (if needed)**
-   - Edit `z_core_top_model.v` parameter:
-     ```verilog
-     parameter INIT_FILE = "software/hello.hex"
-     ```
-
-5. **Run Analysis & Synthesis**
-   - Processing → Start → Analysis & Synthesis
-   - Or: `Ctrl + K`
-
-6. **Run Fitter**
-   - Processing → Start → Fitter
-
-7. **Run Timing Analysis**
-   - Verify all timing constraints are met (no negative slack)
-
-8. **Program FPGA**
-   - Tools → Programmer
-   - Select `output_files/Z-Core.sof`
-   - Click "Start"
-
-9. **Verify Operation**
-   - Press and release `KEY[0]` to reset
-   - Observe `LEDR[9]` blinking (heartbeat)
-   - Observe `LEDR[7:0]` for GPIO activity
-
-### Important Quartus Settings
-
-| Setting                  | Value/Location                              |
-|--------------------------|---------------------------------------------|
-| Timing Constraints       | `Z-Core.sdc` (must be in project)           |
-| Device                   | MAX 10 (10M50DAF484C7G)                     |
-| Top-Level Entity         | `z_core_top`                                |
-| Memory Initialization    | Via `bootloader.mif` (M9K configuration)     |
+| Feature | Bootloader (Application) | Hardware (Bootloader/SoC) |
+|---------|--------------------------|---------------------------|
+| **Target Address** | `0x1000` | `0x0000` |
+| **Build Command**  | `make APP=1 myapp.bin` | `cd bootloader/ && make` |
+| **Deployment**     | `python3 upload.py` (UART) | Quartus Recompile + JTAG |
+| **Typical Speed**  | ~5 Seconds | ~5 Minutes |
 
 ---
 
 ## The Bootloader Flow (Fast)
 
-The bootloader allows you to upload and run applications in seconds without recompiling the FPGA bitstream. This is the recommended workflow for software development.
+This is the primary workflow for developing software. You only go through Quartus once to flash the initial bitstream; after that, all application changes happen over UART.
 
-### Step 1 — Compile Application
-Navigate to the `software/` directory and build your program using the application linker script (`linker_app.ld`):
-
+### Step 1 — Compile
+Navigate to the `software/` directory and compile your code:
 ```bash
 cd software/
-make APP=1 cube3d.bin
+make APP=1 hello.bin
 ```
-*Note: `APP=1` ensures the code starts at `0x1000`.*
+*   `APP=1` uses `linker_app.ld`, which places your code at `0x1000` (the application space).
+*   Replace `hello` with your filename (no extension).
 
-### Step 2 — Upload via UART
-Use the provided Python script to send the binary to the FPGA. Replace `/dev/ttyUSB0` with your serial port.
-
+### Step 2 — Upload
 ```bash
-python3 upload.py /dev/ttyUSB0 cube3d.bin
+python3 upload.py /dev/ttyUSB0 hello.bin
 ```
-The script will perform a handshake, send the binary, verify the checksum, and then jump to the application entry point.
+This sends the binary to the bootloader over UART at 115200 baud. The bootloader writes it to RAM starting at `0x1000` and jumps to it automatically.
+
+*Check your port with `ls /dev/ttyUSB*` if unsure.*
 
 ### Step 3 — Monitor
-The `upload.py` script automatically enters terminal mode after a successful upload. You can see UART output from your program immediately. Press `Ctrl+C` to exit the terminal.
+The upload script enters terminal mode automatically after a successful upload.
+*   **Interact**: Typed characters are sent to the FPGA.
+*   **Exit**: Press **Ctrl+C**.
+*   **Skip**: Use `python3 upload.py /dev/ttyUSB0 hello.bin -n` to upload only.
 
-To upload without entering terminal mode:
-```bash
-python3 upload.py /dev/ttyUSB0 cube3d.bin -n
-```
+> [!IMPORTANT]
+> **Memory Limits**: The application space is **12 KB** (`0x1000`–`0x3FFF`). Ensure your total binary size (text + data + bss) stays under ~12,000 bytes. Use `riscv32-unknown-elf-size myapp.elf` to check.
 
 ---
 
 ## The Bootloader Update Flow (Slow)
 
-If you modify the bootloader itself or the FPGA hardware peripherals, you must perform a full Quartus recompile.
+The bootloader lives at address `0x0000` and is baked directly into the FPGA bitstream as initialized M9K RAM content (the `.mif` file). You only need to redo this if the bootloader code or the hardware peripherals change.
 
-### Step 1 — Compile Bootloader
+### Step 1 — Compile the bootloader
 ```bash
 cd software/bootloader/
 make
 ```
-This produces `bootloader.mif`, which is used by Quartus to initialize the RAM internal content during synthesis.
+This produces `bootloader.mif` in the `software/` directory. Quartus reads this file during synthesis to initialize the memory.
 
-### Step 2 — Recompile FPGA Bitstream
-1. Open Quartus.
-2. Run **Start Compilation** (`Ctrl+L`). This captures the new `.mif` and embeds it in the `.sof` bitstream.
+### Step 2 — Recompile the FPGA bitstream
+1. Open your project in **Quartus Prime**.
+2. Run **Start Compilation** (`Processing → Start Compilation` or **Ctrl+L**).
+3. This process embeds the new `.mif` into the `.sof` bitstream.
 
-### Step 3 — Program via JTAG
-1. Tools → Programmer.
-2. Load `output_files/Z-Core.sof` and click **Start**.
+### Step 3 — Program the FPGA
+1. Open the **Programmer** (`Tools → Programmer`).
+2. Select `output_files/Z-Core.sof`.
+3. Click **Start**. This flashes the bitstream (including the new bootloader) via JTAG.
 
 ---
 
@@ -647,34 +534,34 @@ This produces `bootloader.mif`, which is used by Quartus to initialize the RAM i
 | Symptom                           | Likely Cause                                    | Solution                                      |
 |-----------------------------------|------------------------------------------------|-----------------------------------------------|
 | No heartbeat on LEDR[9]           | Clock not applied or reset stuck               | Check KEY[0], verify clock source             |
-| Program doesn't run               | HEX file missing or path incorrect             | Verify file exists; re-run synthesis          |
-| Random LED behavior               | BSS not cleared, or uninitialized variables    | Ensure `start.S` is linked first              |
+| `upload.py` timeout/fail          | Incorrect port or bootloader not running       | Check `/dev/ttyUSBx`, press reset on FPGA     |
+| Random LED/VGA behavior           | BSS not cleared, or stack overflow             | Ensure `start.S` is linked; check memory size |
 | "1 GHz" timing error              | Missing SDC file                               | Add `Z-Core.sdc` to project                   |
-| HEX file too large                | Program exceeds 4 KB memory                    | Optimize code or increase RAM size            |
-| Linker error: undefined `_start`  | Startup code not assembled                     | Compile `start.S` first                       |
-| Objcopy fails                     | RISC-V toolchain not in PATH                   | Add toolchain `bin/` to system PATH           |
+| Binary too large (> 12 KB)        | Program exceeds application space              | Optimize code or use `-Os` optimization       |
+| Linker error: undefined `_start`  | Startup code not included                      | Ensure `start.S` is compiled and linked       |
+| `upload.py`: Permission denied    | User not in `dialout` or `uucp` group          | Run `sudo chmod 666 /dev/ttyUSB0`             |
 
 ### Debugging Techniques
 
 1. **Check Disassembly**
    ```bash
-   cat hello.lst | head -50
+   riscv32-unknown-elf-objdump -d myapp.elf | head -50
    ```
+   Verify that the entry point is at `0x1000` (for applications) or `0x0000` (for bootloader).
 
-2. **Verify HEX Content**
+2. **Verify Memory Map**
    ```bash
-   head -10 hello.hex
+   cat myapp.map | grep -A10 "Memory Configuration"
    ```
-   First instruction should be `lui sp, 0x1...` or similar startup code.
 
-3. **Check Map File for Addresses**
+3. **Check Section Sizes**
    ```bash
-   cat hello.map | grep -A5 ".text"
+   riscv32-unknown-elf-size myapp.elf
    ```
+   The sum of `text + data + bss` must be less than 12,288 bytes (12 KB).
 
-4. **Simulate in ModelSim**
-   
-   Create a testbench `top_module_tb.v` with the HEX file for pre-synthesis verification.
+4. **Verify UART Output**
+   The `upload.py` script acts as a terminal. Use `uart_puts()` in your code to print debug messages to your PC console.
 
 ---
 

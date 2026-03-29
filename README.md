@@ -82,37 +82,40 @@ or whatever you can think of :D.
 
 ---
 
-## Quick Start
+## Quick Start (UART Bootloader)
 
-### 1. Compile Software
+The Z-Core SoC includes a UART bootloader, allowing you to upload and run applications in seconds without recompiling the FPGA hardware.
 
+### Step 1 — Compile
 ```bash
-cd software
-./hex_gen.sh -Target hello
+cd software/
+make APP=1 hello.bin
+```
+*Note: `APP=1` uses a specific linker script for the application space (0x1000).
+
+### Step 2 — Upload
+```bash
+python3 upload.py /dev/ttyUSB0 hello.bin
+```
+*This sends the binary to the bootloader at 115200 baud. The bootloader writes it to RAM and jumps to it automatically.*
+
+### Step 3 — Monitor
+The upload script enters terminal mode automatically. Press **Ctrl+C** to exit. To skip terminal mode:
+```bash
+python3 upload.py /dev/ttyUSB0 hello.bin -n
 ```
 
-### 2. Synthesize FPGA Design
+### Quick Reference
 
-1. Create new Quartus Prime project for MAX 10 (10M50DAF484C7G)
-2. Add RTL files from `rtl/` directory
-3. Import settings: `Assignments → Import Assignments` → select `Z-Core.qsf`
-4. Add timing constraints: `Z-Core.sdc`
-5. Run Analysis & Synthesis (`Ctrl+K`)
-6. Run Fitter (`Ctrl+L`)
+| What | Command |
+|------|---------|
+| Compile | `make APP=1 myprogram.bin` |
+| Upload + Monitor | `python3 upload.py /dev/ttyUSB0 myprogram.bin` |
+| Upload only | `python3 upload.py /dev/ttyUSB0 myprogram.bin -n` |
+| Clean build | `make clean` |
 
-### 3. Program FPGA
-
-1. Open Programmer (`Tools → Programmer`)
-2. Load `output_files/Z-Core.sof`
-3. Click Start
-
-### 4. Verify Operation
-
-| Indicator | Expected Behavior |
-|-----------|-------------------|
-| `LEDR[9]` | Heartbeat blink (~0.74 Hz) |
-| `LEDR[7:0]` | GPIO output register |
-| `KEY[0]` | Press to reset CPU |
+> [!IMPORTANT]
+> **Memory Limit**: Application space is **12 KB** (0x1000–0x3FFF). Keep the total size (text+data+bss) under ~12,000 bytes.
 
 ---
 
@@ -214,7 +217,6 @@ The capability of using the 64MB SDRAM will be added in the future.
 │   ├── linker_app.ld          # Application linker (origin 0x1000)
 │   ├── Makefile               # GNU Make build system
 │   ├── upload.py              # UART bootloader client
-│   ├── hex_gen.sh             # Build helper script
 │   └── elf2hex.py             # HEX/MIF generation utility
 │
 ├── doc/                        # Documentation
