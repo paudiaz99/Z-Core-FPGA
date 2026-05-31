@@ -2,15 +2,19 @@
  * VGA Test — Z-Core RISC-V
  *
  * Draws SMPTE-style color bars, then animates a bouncing square
- * on the 160x120 framebuffer (4x upscaled to 640x480 VGA).
+ * on the 320x200 framebuffer (2x horizontal, Bresenham vertical stretch to 640x480).
  */
 
 #include "libs/uart.h"
 #include "libs/vga.h"
 
+#define BAR_ROWS  (VGA_HEIGHT / 2)
 #define BALL_SIZE 6
+#define BALL_X0   (VGA_WIDTH  / 4)
+#define BALL_Y0   (VGA_HEIGHT / 4)
 
-static void draw_gradient(int y0, int h) {
+static void draw_gradient(int y0, int h)
+{
     for (int y = y0; y < y0 + h && y < VGA_HEIGHT; y++) {
         VGA_FB_ADDR = (unsigned int)(y * VGA_WIDTH);
         for (int x = 0; x < VGA_WIDTH; x++) {
@@ -22,14 +26,15 @@ static void draw_gradient(int y0, int h) {
     }
 }
 
-int main(void) {
+int main(void)
+{
     uart_puts("VGA Test\r\n");
 
-    /* Phase 1: color bars (top 60 rows) */
+    /* Phase 1: color bars (top half) */
     vga_fill(VGA_BLACK);
 
     uart_puts("Color bars...\r\n");
-    for (int y = 0; y < 60; y++) {
+    for (int y = 0; y < BAR_ROWS; y++) {
         static const unsigned char bars[] = {
             VGA_WHITE, VGA_YELLOW, VGA_CYAN, VGA_GREEN,
             VGA_MAGENTA, VGA_RED, VGA_BLUE, VGA_BLACK
@@ -43,24 +48,22 @@ int main(void) {
         }
     }
 
-    /* Phase 2: gradient (bottom 60 rows) */
+    /* Phase 2: gradient (bottom half) */
     uart_puts("Gradient...\r\n");
-    draw_gradient(60, 60);
+    draw_gradient(BAR_ROWS, BAR_ROWS);
 
     uart_puts("Bouncing ball...\r\n");
 
     /* Phase 3: bouncing square */
-    int bx = 40, by = 40;
+    int bx = BALL_X0, by = BALL_Y0;
     int dx = 1, dy = 1;
     int frame = 0;
 
     while (1) {
         vga_wait_vsync();
 
-        /* Erase old ball */
         vga_fill_rect(bx, by, BALL_SIZE, BALL_SIZE, VGA_BLACK);
 
-        /* Update position */
         bx += dx;
         by += dy;
 
@@ -73,7 +76,6 @@ int main(void) {
             by += dy;
         }
 
-        /* Draw ball with a simple color cycle */
         unsigned char color = VGA_RGB(
             (frame >> 3) & 7,
             (frame >> 5) & 7,

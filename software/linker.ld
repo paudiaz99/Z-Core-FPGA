@@ -3,7 +3,7 @@ ENTRY(_start)
 
 MEMORY
 {
-    RAM (rwx) : ORIGIN = 0x00000000, LENGTH = 4K
+    RAM (rwx) : ORIGIN = 0x00000000, LENGTH = 16K
 }
 
 SECTIONS
@@ -32,6 +32,6 @@ SECTIONS
     . = ALIGN(8);
     _end = .;
     
-    /* Stack grows down from top of 4KB RAM */
-    _stack_top = 0x00001000;
+    /* Stack grows down from top of 16KB RAM */
+    _stack_top = 0x00004000;
 }

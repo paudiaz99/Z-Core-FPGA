@@ -25,15 +25,25 @@ SOFTWARE.
 #ifndef UART_H
 #define UART_H
 
-#define UART_BASE 0x04000000
-#define UART_TX (*((volatile unsigned int *)(UART_BASE + 0x00)))
-#define UART_RX (*((volatile unsigned int *)(UART_BASE + 0x04)))
-#define UART_STAT (*((volatile unsigned int *)(UART_BASE + 0x08)))
+#define UART_BASE     0x04000000
+#define UART_TX       (*((volatile unsigned int *)(UART_BASE + 0x00)))
+#define UART_RX       (*((volatile unsigned int *)(UART_BASE + 0x04)))
+#define UART_STAT     (*((volatile unsigned int *)(UART_BASE + 0x08)))
+#define UART_CTRL     (*((volatile unsigned int *)(UART_BASE + 0x0C)))
+#define UART_BAUD_DIV (*((volatile unsigned int *)(UART_BASE + 0x10)))
+
+// STATUS register bits
+#define UART_STAT_TX_EMPTY  0x01
+#define UART_STAT_TX_BUSY   0x02
+#define UART_STAT_RX_VALID  0x04
+#define UART_STAT_RX_ERROR  0x08
 
 void uart_putc(char c);
 void uart_puts(const char *s);
 char uart_getc(void);
+char uart_getc_blocking(void);
 void uart_puthex(unsigned int val);
 void uart_putint(int val);
+void uart_set_baud(unsigned int divisor);
 
 #endif // UART_H

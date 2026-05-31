@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
 """
-Z-Core Bootloader Upload Tool
+Z-Core Bootloader Upload Tool v2.0 (Multi-Segment + SDRAM)
 
-Sends a compiled binary to the Z-Core RISC-V bootloader over UART.
-No external dependencies -- uses only the Python standard library.
+Sends one or more binary segments to the Z-Core bootloader over UART.
+Supports baud rate negotiation for faster uploads (e.g. 460800 baud).
 
 Usage:
-    ./upload.py <serial_port> <binary_file> [--baud 115200] [--no-terminal]
-
-Examples:
+    # Single file (legacy-style, loads to 0x1000 by default):
     ./upload.py /dev/ttyUSB0 hello.bin
-    ./upload.py /dev/ttyUSB0 hello.bin -n   # upload only, don't monitor
+
+    # Single file to SDRAM:
+    ./upload.py /dev/ttyUSB0 doom.bin --base 0x10000000
+
+    # Multi-segment (DOOM code + WAD):
+    ./upload.py /dev/ttyUSB0 --segments doom.bin@0x10000000 doom1.wad@0x12010000 --entry 0x10000000
+
+    # With high-speed baud:
+    ./upload.py /dev/ttyUSB0 --segments doom.bin@0x10000000 doom1.wad@0x12010000 --entry 0x10000000 --fast
+
+No external dependencies -- uses only the Python standard library.
 """
 
 import sys
@@ -26,37 +34,37 @@ SYNC_ACK = 0xA5
 ACK      = 0x06
 NAK      = 0x15
 
+# FPGA clock for baud divisor calculation
+FPGA_CLK_HZ = 50_000_000
+
 
 def configure_port(fd, baud):
     """Configure serial port: 8N1, raw mode, given baud rate."""
     import termios
 
     baud_map = {
-        9600:   termios.B9600,
-        19200:  termios.B19200,
-        38400:  termios.B38400,
-        57600:  termios.B57600,
-        115200: termios.B115200,
+        9600:    termios.B9600,
+        19200:   termios.B19200,
+        38400:   termios.B38400,
+        57600:   termios.B57600,
+        115200:  termios.B115200,
+        230400:  termios.B230400,
+        460800:  termios.B460800,
     }
     if baud not in baud_map:
-        raise ValueError(f"Unsupported baud rate: {baud}")
+        raise ValueError(f"Unsupported baud rate: {baud}. "
+                         f"Supported: {sorted(baud_map.keys())}")
     baud_const = baud_map[baud]
 
     attrs = termios.tcgetattr(fd)
-    # Raw input
-    attrs[0] = 0
-    # Raw output
-    attrs[1] = 0
-    # 8N1, enable receiver, local mode
-    attrs[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
-    # No local flags
-    attrs[3] = 0
-    # Baud rate
-    attrs[4] = baud_const
-    attrs[5] = baud_const
-    # VMIN=1, VTIME=50 (5-second timeout in tenths of a second)
+    attrs[0] = 0                                          # Raw input
+    attrs[1] = 0                                          # Raw output
+    attrs[2] = termios.CS8 | termios.CREAD | termios.CLOCAL  # 8N1
+    attrs[3] = 0                                          # No local flags
+    attrs[4] = baud_const                                 # Input baud
+    attrs[5] = baud_const                                 # Output baud
     attrs[6][termios.VMIN]  = 1
-    attrs[6][termios.VTIME] = 50
+    attrs[6][termios.VTIME] = 50                          # 5s timeout
     termios.tcsetattr(fd, termios.TCSANOW, attrs)
     termios.tcflush(fd, termios.TCIOFLUSH)
 
@@ -108,36 +116,45 @@ def terminal_mode(fd):
         print("\n--- Disconnected ---")
 
 
-def upload(port, binary_path, baud, stay_terminal):
-    with open(binary_path, "rb") as f:
-        data = f.read()
+def fpga_baud_div(baud):
+    """Compute the FPGA UART baud divisor for a given baud rate."""
+    return FPGA_CLK_HZ // (16 * baud)
 
-    # Pad to 4-byte boundary
-    while len(data) % 4:
-        data += b"\x00"
 
-    size = len(data)
-    if size == 0:
-        print("Error: binary file is empty.")
-        sys.exit(1)
-    if size > 12288:
-        print(f"Error: binary is {size} bytes, max is 12288 (12 KB).")
-        sys.exit(1)
+def parse_segment(spec):
+    """Parse 'file@address' or just 'file' (address defaults to None)."""
+    if "@" in spec:
+        path, addr_str = spec.rsplit("@", 1)
+        addr = int(addr_str, 0)
+    else:
+        path = spec
+        addr = None
+    return path, addr
 
-    fd = os.open(port, os.O_RDWR | os.O_NOCTTY)
-    configure_port(fd, baud)
 
-    print(f"Z-Core Upload Tool")
-    print(f"  Port   : {port} @ {baud} baud")
-    print(f"  Binary : {binary_path} ({size} bytes)")
-    print()
+def format_size(n):
+    """Human-readable byte size."""
+    if n >= 1024 * 1024:
+        return f"{n / (1024*1024):.1f} MB"
+    if n >= 1024:
+        return f"{n / 1024:.1f} KB"
+    return f"{n} B"
 
-    # Drain any bootloader banner already sitting in the buffer
+
+def upload(fd, segments, entry_point, upload_baud):
+    """
+    Upload segments using the v2 multi-segment protocol.
+
+    segments: list of (base_addr, data_bytes) tuples
+    entry_point: address to jump to after upload
+    upload_baud: baud rate for data transfer (0 = stay at 115200)
+    """
+    # --- Drain any bootloader banner ---
     print("--- Bootloader Output ---")
     time.sleep(0.3)
     drain(fd, echo=True)
 
-    # Sync handshake (retry a few times)
+    # --- Sync handshake ---
     synced = False
     for attempt in range(5):
         os.write(fd, bytes([SYNC_REQ]))
@@ -148,78 +165,210 @@ def upload(port, binary_path, baud, stay_terminal):
                 break
         except TimeoutError:
             pass
-        # Drain any stale data between retries
         drain(fd, echo=True)
 
     if not synced:
         print("\nError: no sync response from bootloader.")
-        os.close(fd)
-        sys.exit(1)
+        return False
 
     print("\n--- Upload ---")
-    print("Sync    : OK")
+    print("Sync       : OK")
 
-    # Send size (ACK/NAK is the first byte the bootloader replies with)
-    os.write(fd, struct.pack("<I", size))
-    resp = recv_byte(fd, timeout=5.0)
-    if resp == NAK:
-        print("Error: bootloader rejected size.")
+    # --- Baud negotiation ---
+    if upload_baud and upload_baud != 115200:
+        baud_div = fpga_baud_div(upload_baud)
+        actual_baud = FPGA_CLK_HZ // (16 * baud_div)
+        print(f"Baud switch: {upload_baud} (div={baud_div}, actual={actual_baud})")
+        os.write(fd, struct.pack("<I", baud_div))
+        resp = recv_byte(fd, timeout=5.0)
+        if resp != ACK:
+            print(f"Error: baud negotiation failed (0x{resp:02X})")
+            return False
+        # Switch host baud and wait for bootloader to settle
         time.sleep(0.1)
-        drain(fd, echo=True)
-        os.close(fd)
-        sys.exit(1)
+        configure_port(fd, upload_baud)
+        time.sleep(0.1)
+        # Wait for ready ACK at new baud
+        resp = recv_byte(fd, timeout=5.0)
+        if resp != ACK:
+            print(f"Error: no ready ACK at new baud (got 0x{resp:02X})")
+            return False
+        print(f"Baud       : switched OK")
+    else:
+        # Send 0 = keep current baud
+        os.write(fd, struct.pack("<I", 0))
+        resp = recv_byte(fd, timeout=5.0)
+        if resp != ACK:
+            print(f"Error: baud ACK failed (0x{resp:02X})")
+            return False
+
+    # --- Segment count ---
+    seg_count = len(segments)
+    os.write(fd, bytes([seg_count]))
+    resp = recv_byte(fd, timeout=5.0)
     if resp != ACK:
-        print(f"Error: unexpected response 0x{resp:02X}")
-        os.close(fd)
-        sys.exit(1)
-    # Drain the text that follows ACK (e.g. "RX 889 bytes\r\n")
+        print(f"Error: segment count rejected (0x{resp:02X})")
+        drain(fd, echo=True)
+        return False
+    # Drain text output
     time.sleep(0.05)
     drain(fd, echo=True)
-    print(f"Size    : {size} bytes accepted")
 
-    # Send data
-    checksum = sum(data) & 0xFFFFFFFF
-    os.write(fd, data)
-    print(f"Data    : sent")
+    # --- Send each segment ---
+    total_bytes = sum(len(data) for _, data in segments)
+    sent_bytes = 0
 
-    # Send checksum (ACK/NAK is the first byte back)
-    os.write(fd, struct.pack("<I", checksum))
-    resp = recv_byte(fd, timeout=5.0)
-    if resp == ACK:
-        print(f"Checksum: OK (0x{checksum:08X})")
-    elif resp == NAK:
-        print(f"Error: checksum mismatch!")
-        time.sleep(0.1)
+    for i, (base, data) in enumerate(segments):
+        size = len(data)
+        checksum = sum(data) & 0xFFFFFFFF
+
+        print(f"Segment {i} : 0x{base:08X}  {format_size(size)}")
+
+        # Send base + size
+        os.write(fd, struct.pack("<II", base, size))
+        resp = recv_byte(fd, timeout=5.0)
+        if resp != ACK:
+            print(f"  Error: header rejected (0x{resp:02X})")
+            drain(fd, echo=True)
+            return False
+        # Drain text
+        time.sleep(0.05)
         drain(fd, echo=True)
-        os.close(fd)
-        sys.exit(1)
-    else:
-        print(f"Error: unexpected response 0x{resp:02X}")
-        os.close(fd)
-        sys.exit(1)
 
-    # Drain remaining bootloader messages (e.g. "OK! Jumping to ...")
-    time.sleep(0.2)
+        # Send payload in chunks with progress
+        chunk_size = 4096
+        for offset in range(0, size, chunk_size):
+            end = min(offset + chunk_size, size)
+            os.write(fd, data[offset:end])
+            sent_bytes += (end - offset)
+            pct = 100.0 * sent_bytes / total_bytes
+            print(f"\r  Progress : {pct:5.1f}%  ({format_size(sent_bytes)} / {format_size(total_bytes)})",
+                  end="", flush=True)
+        print()
+
+        # Send checksum
+        os.write(fd, struct.pack("<I", checksum))
+        resp = recv_byte(fd, timeout=10.0)
+        if resp == NAK:
+            print(f"  Error: checksum mismatch!")
+            time.sleep(0.1)
+            drain(fd, echo=True)
+            return False
+        if resp != ACK:
+            print(f"  Error: unexpected response 0x{resp:02X}")
+            return False
+        print(f"  Checksum : OK (0x{checksum:08X})")
+
+    # --- Entry point ---
+    os.write(fd, struct.pack("<I", entry_point))
+    resp = recv_byte(fd, timeout=5.0)
+    if resp != ACK:
+        print(f"Error: entry point rejected (0x{resp:02X})")
+        return False
+    # Drain text (e.g. "Jump 0x...")
+    time.sleep(0.1)
     drain(fd, echo=True)
 
-    print("\nUpload complete. Program is running.")
-
-    if stay_terminal:
-        terminal_mode(fd)
-
-    os.close(fd)
+    print(f"\nEntry      : 0x{entry_point:08X}")
+    print("Upload complete. Program is running.")
+    return True
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Z-Core Bootloader Upload Tool")
+    parser = argparse.ArgumentParser(
+        description="Z-Core Bootloader Upload Tool v2.0 (Multi-Segment + SDRAM)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+Examples:
+  %(prog)s /dev/ttyUSB0 hello.bin                    # BRAM app (0x1000)
+  %(prog)s /dev/ttyUSB0 test.bin --base 0x10000000   # Single SDRAM segment
+  %(prog)s /dev/ttyUSB0 --segments doom.bin@0x10000000 doom1.wad@0x12010000 --entry 0x10000000
+  %(prog)s /dev/ttyUSB0 --segments doom.bin@0x10000000 doom1.wad@0x12010000 --entry 0x10000000 --fast
+""")
+
     parser.add_argument("port", help="Serial port (e.g. /dev/ttyUSB0)")
-    parser.add_argument("binary", help="Binary file to upload (.bin)")
-    parser.add_argument("--baud", type=int, default=115200, help="Baud rate (default: 115200)")
+    parser.add_argument("binary", nargs="?", default=None,
+                        help="Binary file for single-segment upload")
+    parser.add_argument("--base", type=lambda x: int(x, 0), default=0x1000,
+                        help="Load address for single-segment mode (default: 0x1000)")
+    parser.add_argument("--segments", nargs="+", metavar="FILE@ADDR",
+                        help="Multi-segment: file@address pairs")
+    parser.add_argument("--entry", type=lambda x: int(x, 0), default=None,
+                        help="Entry point address (default: base of first segment)")
+    parser.add_argument("--baud", type=int, default=115200,
+                        help="Initial baud rate (default: 115200)")
+    parser.add_argument("--fast", action="store_true",
+                        help="Switch to 460800 baud after sync")
+    parser.add_argument("--upload-baud", type=int, default=None,
+                        help="Baud rate for data transfer (overrides --fast)")
     parser.add_argument("--no-terminal", "-n", action="store_true",
                         help="Exit after upload instead of monitoring UART")
     args = parser.parse_args()
 
-    upload(args.port, args.binary, args.baud, not args.no_terminal)
+    # Build segment list
+    segments = []
+    if args.segments:
+        for spec in args.segments:
+            path, addr = parse_segment(spec)
+            if addr is None:
+                print(f"Error: segment '{spec}' must have @address")
+                sys.exit(1)
+            with open(path, "rb") as f:
+                data = f.read()
+            # Pad to 4-byte boundary
+            while len(data) % 4:
+                data += b"\x00"
+            segments.append((addr, data))
+    elif args.binary:
+        with open(args.binary, "rb") as f:
+            data = f.read()
+        while len(data) % 4:
+            data += b"\x00"
+        if len(data) == 0:
+            print("Error: binary file is empty.")
+            sys.exit(1)
+        segments.append((args.base, data))
+    else:
+        parser.print_help()
+        sys.exit(1)
+
+    # Determine entry point
+    entry_point = args.entry if args.entry is not None else segments[0][0]
+
+    # Determine upload baud
+    if args.upload_baud:
+        upload_baud = args.upload_baud
+    elif args.fast:
+        upload_baud = 460800
+    else:
+        upload_baud = 0  # Stay at initial baud
+
+    # Print summary
+    total = sum(len(d) for _, d in segments)
+    print("Z-Core Upload Tool v2.0")
+    print(f"  Port   : {args.port} @ {args.baud} baud")
+    if upload_baud:
+        print(f"  Upload : {upload_baud} baud (after sync)")
+    print(f"  Total  : {format_size(total)} in {len(segments)} segment(s)")
+    for i, (base, data) in enumerate(segments):
+        print(f"    [{i}] 0x{base:08X}  {format_size(len(data))}")
+    print(f"  Entry  : 0x{entry_point:08X}")
+    print()
+
+    # Open port at initial baud
+    fd = os.open(args.port, os.O_RDWR | os.O_NOCTTY)
+    configure_port(fd, args.baud)
+
+    try:
+        ok = upload(fd, segments, entry_point, upload_baud)
+        if not ok:
+            os.close(fd)
+            sys.exit(1)
+
+        if not args.no_terminal:
+            terminal_mode(fd)
+    finally:
+        os.close(fd)
 
 
 if __name__ == "__main__":

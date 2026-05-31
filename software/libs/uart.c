@@ -39,8 +39,16 @@ void uart_puts(const char *s) {
 
 char uart_getc(void) { return (char)(UART_RX & 0xFF); }
 
+char uart_getc_blocking(void) {
+  while (!(UART_STAT & UART_STAT_RX_VALID))
+    ;
+  return (char)(UART_RX & 0xFF);
+}
+
+void uart_set_baud(unsigned int divisor) { UART_BAUD_DIV = divisor; }
+
 void uart_puthex(unsigned int val) {
-  const char hex[] = "0123456789ABCDEF";
+  static const char hex[] = "0123456789ABCDEF";
   uart_puts("0x");
   for (int i = 28; i >= 0; i -= 4) {
     uart_putc(hex[(val >> i) & 0xF]);

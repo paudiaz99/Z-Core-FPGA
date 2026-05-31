@@ -1,29 +1,17 @@
-# Copyright (c) 2025 Pau Díaz Cuesta
-
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
 #!/usr/bin/env python3
 """
-ELF to Verilog HEX Converter for Z-Core
-Converts RISC-V ELF files to 32-bit word-addressed hex format for $readmemh.
+ELF to Verilog HEX/MIF Converter for Z-Core
+Converts RISC-V ELF files to 32-bit word-addressed hex or MIF format.
 
-Usage: python elf2hex.py <input.elf> <output.hex> [memory_size_words]
+HEX format: Simple hex values for $readmemh (may not infer M9K blocks)
+MIF format: Quartus Memory Initialization File (recommended for M9K inference)
+
+Usage: 
+    python elf2hex.py <input.elf> <output.hex|output.mif> [memory_size_words]
+    
+Examples:
+    python elf2hex.py program.elf program.hex 1024    # HEX format, 4KB (1024 words)
+    python elf2hex.py program.elf program.mif 1024    # MIF format, 4KB (1024 words)
 """
 
 import sys
@@ -31,9 +19,11 @@ import subprocess
 import tempfile
 import os
 import struct
+from pathlib import Path
 
-def elf_to_hex(elf_path, hex_path, mem_size_words=16384):
-    """Convert ELF to 32-bit word hex format."""
+
+def get_binary_data(elf_path):
+    """Convert ELF to raw binary data."""
     
     # Create temporary binary file
     with tempfile.NamedTemporaryFile(suffix='.bin', delete=False) as tmp:
@@ -42,7 +32,7 @@ def elf_to_hex(elf_path, hex_path, mem_size_words=16384):
     try:
         # Convert ELF to raw binary
         objcopy_cmd = [
-            'riscv64-unknown-elf-objcopy',
+            'riscv32-unknown-elf-objcopy',
             '-O', 'binary',
             elf_path,
             bin_path
@@ -61,34 +51,147 @@ def elf_to_hex(elf_path, hex_path, mem_size_words=16384):
         while len(binary_data) % 4 != 0:
             binary_data += b'\x00'
         
-        # Convert to 32-bit words (little-endian, as RISC-V is LE)
-        num_words = len(binary_data) // 4
-        words = struct.unpack(f'<{num_words}I', binary_data)
-        
-        # Write hex file
-        with open(hex_path, 'w') as f:
-            for i, word in enumerate(words):
-                f.write(f'{word:08X}\n')
-            
-            # Optionally pad remaining memory with zeros
-            # for i in range(num_words, mem_size_words):
-            #     f.write('00000000\n')
-        
-        print(f"Converted {elf_path} -> {hex_path}")
-        print(f"  {num_words} words ({len(binary_data)} bytes)")
+        return binary_data
         
     finally:
         # Clean up temp file
         if os.path.exists(bin_path):
             os.remove(bin_path)
 
+
+def binary_to_words(binary_data):
+    """Convert binary data to list of 32-bit words (little-endian)."""
+    num_words = len(binary_data) // 4
+    words = struct.unpack(f'<{num_words}I', binary_data)
+    return list(words)
+
+
+def write_hex_file(words, hex_path, mem_size_words):
+    """Write words to Verilog HEX format file."""
+    with open(hex_path, 'w') as f:
+        for word in words:
+            f.write(f'{word:08X}\n')
+        
+        # Pad remaining memory with zeros
+        for i in range(len(words), mem_size_words):
+            f.write('00000000\n')
+
+
+def write_mif_file(words, mif_path, mem_size_words):
+    """
+    Write words to Quartus MIF (Memory Initialization File) format.
+    Also generates 4 byte-lane MIF files for M9K inference with byte enables.
+    """
+    # Write 32-bit wide MIF (for reference / simulation)
+    _write_single_mif(words, mif_path, mem_size_words, width=32,
+                      extract=lambda w: w)
+
+    # Write 4 byte-lane MIF files (8-bit wide each, for M9K synthesis)
+    base = os.path.splitext(mif_path)[0]
+    shifts = [0, 8, 16, 24]
+    for lane, shift in enumerate(shifts):
+        lane_path = f"{base}_byte{lane}.mif"
+        _write_single_mif(words, lane_path, mem_size_words, width=8,
+                          extract=lambda w, s=shift: (w >> s) & 0xFF)
+        print(f"  Byte lane {lane}: {lane_path}")
+
+
+def _write_single_mif(words, mif_path, mem_size_words, width, extract):
+    """Write a single MIF file with the given width and data extraction function."""
+    fmt_width = width // 4  # hex chars needed
+    with open(mif_path, 'w') as f:
+        f.write("-- Memory Initialization File for Z-Core\n")
+        f.write("-- Generated by elf2hex.py\n\n")
+
+        f.write(f"DEPTH = {mem_size_words};\n")
+        f.write(f"WIDTH = {width};\n")
+        f.write(f"ADDRESS_RADIX = HEX;\n")
+        f.write(f"DATA_RADIX = HEX;\n\n")
+
+        f.write("CONTENT\nBEGIN\n")
+
+        for addr, word in enumerate(words):
+            f.write(f"    {addr:03X} : {extract(word):0{fmt_width}X};\n")
+
+        if len(words) < mem_size_words:
+            zero = '0' * fmt_width
+            if mem_size_words - len(words) == 1:
+                f.write(f"    {len(words):03X} : {zero};\n")
+            else:
+                f.write(f"    [{len(words):03X}..{mem_size_words-1:03X}] : {zero};\n")
+
+        f.write("END;\n")
+
+
+def elf_to_memory_file(elf_path, output_path, mem_size_words=1024):
+    """
+    Convert ELF to memory initialization file (HEX or MIF format).
+    
+    Format is determined by output file extension:
+        .hex -> Verilog $readmemh format
+        .mif -> Quartus Memory Initialization Format (recommended)
+    """
+    # Determine output format from extension
+    output_ext = Path(output_path).suffix.lower()
+    
+    if output_ext not in ['.hex', '.mif']:
+        print(f"Warning: Unknown extension '{output_ext}', defaulting to HEX format")
+        output_ext = '.hex'
+    
+    # Get binary data from ELF
+    binary_data = get_binary_data(elf_path)
+    
+    # Convert to words
+    words = binary_to_words(binary_data)
+    
+    # Check if data fits in memory
+    if len(words) > mem_size_words:
+        print(f"ERROR: Program size ({len(words)} words, {len(words)*4} bytes) "
+              f"exceeds memory size ({mem_size_words} words, {mem_size_words*4} bytes)")
+        sys.exit(1)
+    
+    # Write output file
+    if output_ext == '.mif':
+        write_mif_file(words, output_path, mem_size_words)
+        format_name = "MIF (Quartus Memory Initialization File)"
+    else:
+        write_hex_file(words, output_path, mem_size_words)
+        format_name = "HEX (Verilog $readmemh)"
+    
+    # Print summary
+    print(f"Converted {elf_path} -> {output_path}")
+    print(f"  Format: {format_name}")
+    print(f"  Program: {len(words)} words ({len(words)*4} bytes)")
+    print(f"  Memory:  {mem_size_words} words ({mem_size_words*4} bytes)")
+    print(f"  Usage:   {100*len(words)/mem_size_words:.1f}%")
+    
+    # M9K estimation
+    m9k_words_per_block = 288  # 9216 bits / 32 bits per word
+    m9k_blocks = (mem_size_words + m9k_words_per_block - 1) // m9k_words_per_block
+    print(f"  M9K Blocks: ~{m9k_blocks} (at 32-bit width)")
+
+
+def print_usage():
+    """Print usage information."""
+    print(__doc__)
+    print("Memory size examples:")
+    print("  256  words =  1 KB")
+    print("  512  words =  2 KB")
+    print("  1024 words =  4 KB (default)")
+    print("  2048 words =  8 KB")
+    print("  4096 words = 16 KB")
+    print()
+    print("M9K Block capacity at 32-bit width: 288 words (1,152 bytes)")
+    print("Quartus automatically partitions larger memories across multiple M9K blocks.")
+
+
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print("Usage: python elf2hex.py <input.elf> <output.hex> [memory_size_words]")
+        print_usage()
         sys.exit(1)
     
     elf_file = sys.argv[1]
-    hex_file = sys.argv[2]
-    mem_size = int(sys.argv[3]) if len(sys.argv) > 3 else 16384
+    output_file = sys.argv[2]
+    mem_size = int(sys.argv[3]) if len(sys.argv) > 3 else 1024  # Default: 4KB
     
-    elf_to_hex(elf_file, hex_file, mem_size)
+    elf_to_memory_file(elf_file, output_file, mem_size)

@@ -75,6 +75,30 @@ module z_core_csr_file #(
     input  wire                 instret_pulse,    // Pulse when instruction retires
 
     // ============================================
+    //           Cache Hit/Miss Counters
+    // ============================================
+    input  wire                 inst_cache_hit_pulse,    // Pulse when cache hit
+    input  wire                 inst_cache_miss_pulse,    // Pulse when cache miss
+    input  wire                 data_cache_hit_pulse,    // Pulse when cache hit
+
+    // ============================================
+    //           Memory Access Counters
+    // ============================================
+    input  wire                 mem_read_pulse,   // Pulse when memory read
+    input  wire                 mem_write_pulse,  // Pulse when memory write
+    input  wire                 mem_inst_fetch_pulse,  // Pulse when memory instruction fetch
+
+    // ============================================
+    //           Branch Misprediction Counters
+    // ============================================
+    input  wire                 branch_misprediction_pulse,  // Pulse when branch misprediction
+
+    // ============================================
+    //           Pipeline Flush Counters
+    // ============================================
+    input  wire                 pipeline_flush_pulse,  // Pulse when pipeline flush
+
+    // ============================================
     // CSR Outputs (directly used by control unit)
     // ============================================
     output wire                 mstatus_mie,      // Global interrupt enable (mstatus.MIE)
@@ -116,6 +140,22 @@ module z_core_csr_file #(
     localparam ADDR_CYCLEH     = 12'hC80;
     localparam ADDR_INSTRET    = 12'hC02;
     localparam ADDR_INSTRETH   = 12'hC82;
+    localparam ADDR_MHPMCOUNTER3 = 12'hC03;
+    localparam ADDR_MHPMCOUNTER3H = 12'hC83;
+    localparam ADDR_MHPMCOUNTER4 = 12'hC04;
+    localparam ADDR_MHPMCOUNTER4H = 12'hC84;
+    localparam ADDR_MHPMCOUNTER5 = 12'hC05;
+    localparam ADDR_MHPMCOUNTER5H = 12'hC85;
+    localparam ADDR_MHPMCOUNTER6 = 12'hC06;
+    localparam ADDR_MHPMCOUNTER6H = 12'hC86;
+    localparam ADDR_MHPMCOUNTER7 = 12'hC07;
+    localparam ADDR_MHPMCOUNTER7H = 12'hC87;
+    localparam ADDR_MHPMCOUNTER8 = 12'hC08;
+    localparam ADDR_MHPMCOUNTER8H = 12'hC88;
+    localparam ADDR_MHPMCOUNTER9 = 12'hC09;
+    localparam ADDR_MHPMCOUNTER9H = 12'hC89;
+    localparam ADDR_MHPMCOUNTER10 = 12'hC0A;
+    localparam ADDR_MHPMCOUNTER10H = 12'hC8A;
 
     // =========================================================================
     //  CSR Registers
@@ -203,9 +243,17 @@ module z_core_csr_file #(
     // --- mtval (Machine Trap Value) ---
     reg [DATA_WIDTH-1:0] mtval_r;
 
-    // --- Performance Counters ---
+    // --- Performance Counters (Write Any, Read Legal (WARL) Registers) ---
     reg [63:0] mcycle_r;
     reg [63:0] minstret_r;
+    reg [63:0] mhpmcounter3_r; // I-Cache Hits
+    reg [63:0] mhpmcounter4_r; // D-Cache Hits
+    reg [63:0] mhpmcounter5_r; // Load Requests 
+    reg [63:0] mhpmcounter6_r; // Store Requests
+    reg [63:0] mhpmcounter7_r; // Branch Mispredictions
+    reg [63:0] mhpmcounter8_r; // Pipeline Flushes
+    reg [63:0] mhpmcounter9_r; // I-Cache Misses 
+    reg [63:0] mhpmcounter10_r; // Memory Instruction Fetches
 
     // =========================================================================
     //  Output Assignments
@@ -256,6 +304,22 @@ module z_core_csr_file #(
             ADDR_INSTRET:   csr_read_data = minstret_r[31:0];
             ADDR_MINSTRETH,
             ADDR_INSTRETH:  csr_read_data = minstret_r[63:32];
+            ADDR_MHPMCOUNTER3: csr_read_data = mhpmcounter3_r[31:0];
+            ADDR_MHPMCOUNTER3H: csr_read_data = mhpmcounter3_r[63:32];
+            ADDR_MHPMCOUNTER4: csr_read_data = mhpmcounter4_r[31:0];
+            ADDR_MHPMCOUNTER4H: csr_read_data = mhpmcounter4_r[63:32];
+            ADDR_MHPMCOUNTER5: csr_read_data = mhpmcounter5_r[31:0];
+            ADDR_MHPMCOUNTER5H: csr_read_data = mhpmcounter5_r[63:32];
+            ADDR_MHPMCOUNTER6: csr_read_data = mhpmcounter6_r[31:0];
+            ADDR_MHPMCOUNTER6H: csr_read_data = mhpmcounter6_r[63:32];
+            ADDR_MHPMCOUNTER7: csr_read_data = mhpmcounter7_r[31:0];
+            ADDR_MHPMCOUNTER7H: csr_read_data = mhpmcounter7_r[63:32];
+            ADDR_MHPMCOUNTER8: csr_read_data = mhpmcounter8_r[31:0];
+            ADDR_MHPMCOUNTER8H: csr_read_data = mhpmcounter8_r[63:32];
+            ADDR_MHPMCOUNTER9: csr_read_data = mhpmcounter9_r[31:0];
+            ADDR_MHPMCOUNTER9H: csr_read_data = mhpmcounter9_r[63:32];
+            ADDR_MHPMCOUNTER10: csr_read_data = mhpmcounter10_r[31:0];
+            ADDR_MHPMCOUNTER10H: csr_read_data = mhpmcounter10_r[63:32];
 
             default:        csr_read_data = 32'h0;
         endcase
@@ -280,12 +344,36 @@ module z_core_csr_file #(
             mtval_r        <= 32'h0;
             mcycle_r       <= 64'h0;
             minstret_r     <= 64'h0;
+            mhpmcounter3_r <= 64'h0;
+            mhpmcounter4_r <= 64'h0;
+            mhpmcounter5_r <= 64'h0;
+            mhpmcounter6_r <= 64'h0;
+            mhpmcounter7_r <= 64'h0;
+            mhpmcounter8_r <= 64'h0;
+            mhpmcounter9_r <= 64'h0;
+            mhpmcounter10_r <= 64'h0;
         end else begin
 
             // --- Always-running counters ---
             mcycle_r <= mcycle_r + 1;
             if (instret_pulse)
                 minstret_r <= minstret_r + 1;
+            if (inst_cache_hit_pulse)
+                mhpmcounter3_r <= mhpmcounter3_r + 1;
+            if(data_cache_hit_pulse)
+                mhpmcounter4_r <= mhpmcounter4_r + 1;
+            if (mem_read_pulse)
+                mhpmcounter5_r <= mhpmcounter5_r + 1;
+            if (mem_write_pulse)
+                mhpmcounter6_r <= mhpmcounter6_r + 1;
+            if (branch_misprediction_pulse)
+                mhpmcounter7_r <= mhpmcounter7_r + 1;
+            if (pipeline_flush_pulse)
+                mhpmcounter8_r <= mhpmcounter8_r + 1;
+            if (mem_inst_fetch_pulse)
+                mhpmcounter10_r <= mhpmcounter10_r + 1;
+            if (inst_cache_miss_pulse)
+                mhpmcounter9_r <= mhpmcounter9_r + 1;
 
             // --- Trap Entry (highest priority over CSR writes) ---
             // Per Privileged Spec §3.1.6.1:
@@ -355,6 +443,54 @@ module z_core_csr_file #(
                     end
                     ADDR_MINSTRETH: begin
                         minstret_r[63:32] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER3: begin
+                        mhpmcounter3_r[31:0] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER3H: begin
+                        mhpmcounter3_r[63:32] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER4: begin
+                        mhpmcounter4_r[31:0] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER4H: begin
+                        mhpmcounter4_r[63:32] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER5: begin
+                        mhpmcounter5_r[31:0] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER5H: begin
+                        mhpmcounter5_r[63:32] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER6: begin
+                        mhpmcounter6_r[31:0] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER6H: begin
+                        mhpmcounter6_r[63:32] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER7: begin
+                        mhpmcounter7_r[31:0] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER7H: begin
+                        mhpmcounter7_r[63:32] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER8: begin
+                        mhpmcounter8_r[31:0] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER8H: begin
+                        mhpmcounter8_r[63:32] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER9: begin
+                        mhpmcounter9_r[31:0] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER9H: begin
+                        mhpmcounter9_r[63:32] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER10: begin
+                        mhpmcounter10_r[31:0] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER10H: begin
+                        mhpmcounter10_r[63:32] <= csr_write_data;
                     end
                     // default: ignore writes to unknown/read-only CSRs
                 endcase

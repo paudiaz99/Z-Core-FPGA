@@ -24,7 +24,7 @@ SOFTWARE.
 
 // **************************************************
 //         AXI-Lite VGA Controller
-//   160x120 framebuffer, 4x upscaled to 640x480
+//   320x200 framebuffer, 2x horizontal / Bresenham vertical stretch to 640x480
 //   8-bit color (3-3-2 RGB)
 //   DE10-Lite 4-bit resistor DAC
 // **************************************************
@@ -33,8 +33,8 @@ module axil_vga #(
     parameter DATA_WIDTH = 32,
     parameter ADDR_WIDTH = 12,
     parameter STRB_WIDTH = (DATA_WIDTH/8),
-    parameter FB_WIDTH   = 160,
-    parameter FB_HEIGHT  = 120
+    parameter FB_WIDTH   = 320,
+    parameter FB_HEIGHT  = 200
 )(
     input  wire                   clk,
     input  wire                   rst,
@@ -71,7 +71,7 @@ module axil_vga #(
 // **************************************************
 //           Register Map
 // **************************************************
-// 0x00: FB_ADDR   [R/W] - Framebuffer write address (0..19199)
+// 0x00: FB_ADDR   [R/W] - Framebuffer write address (0..63999)
 // 0x04: FB_DATA   [W]   - Write pixel color, auto-increment addr
 // 0x08: FB_STATUS [R]   - Bit 0: in vertical blanking
 
@@ -100,7 +100,7 @@ localparam H_END   = H_START + H_DISP;  // 784
 localparam V_START = V_SYNC + V_BACK;   // 35
 localparam V_END   = V_START + V_DISP;  // 515
 
-localparam FB_SIZE = FB_WIDTH * FB_HEIGHT;  // 19200
+localparam FB_SIZE = FB_WIDTH * FB_HEIGHT;  // 64000
 
 // **************************************************
 //            Framebuffer (dual-port M9K)
@@ -168,14 +168,39 @@ wire active   = h_active && v_active;
 
 wire in_vblank = !v_active;
 
-// Framebuffer coordinates (4x upscale: divide by 4)
-wire [7:0] fb_x = (h_count - H_START) >> 2;
-wire [6:0] fb_y = (v_count - V_START) >> 2;
+// Horizontal 2x scale (320→640); vertical Bresenham stretch (200→480, fills screen)
+wire [9:0] vis_x = h_count - H_START;
+wire       in_fb = active;
+wire [8:0] fb_x  = vis_x >> 1;
 
-// y * 160 = y * 128 + y * 32 = (y << 7) + (y << 5)
-wire [14:0] fb_rd_addr = active
-    ? ({1'b0, fb_y, 7'd0} + {3'd0, fb_y, 5'd0} + {7'd0, fb_x})
-    : 15'd0;
+// Bresenham: for each display line advance source_y by FB_HEIGHT/V_DISP = 200/480
+reg  [7:0] fb_y;
+reg  [9:0] fb_y_err;
+
+always @(posedge clk) begin
+    if (rst) begin
+        fb_y     <= 8'd0;
+        fb_y_err <= 10'd0;
+    end else if (pixel_en && h_count == H_TOTAL - 1) begin
+        if (v_count == V_START - 1) begin
+            // Reset before first active display line
+            fb_y     <= 8'd0;
+            fb_y_err <= 10'd0;
+        end else if (v_count >= V_START && v_count < V_END) begin
+            if (fb_y_err + 10'd200 >= 10'd480) begin
+                fb_y_err <= fb_y_err + 10'd200 - 10'd480;
+                fb_y     <= fb_y + 8'd1;
+            end else begin
+                fb_y_err <= fb_y_err + 10'd200;
+            end
+        end
+    end
+end
+
+// y * 320 = (y << 8) + (y << 6)
+wire [15:0] fb_rd_addr = in_fb
+    ? ({1'b0, fb_y, 8'd0} + {2'd0, fb_y, 6'd0} + {7'd0, fb_x})
+    : 16'd0;
 
 // Registered read — 1-cycle latency
 reg [7:0] pixel_data;
@@ -183,10 +208,10 @@ always @(posedge clk) begin
     pixel_data <= framebuffer[fb_rd_addr];
 end
 
-// Delay active flag to match read latency
-reg active_d;
+// Delay in_fb flag to match read latency
+reg in_fb_d;
 always @(posedge clk) begin
-    active_d <= active;
+    in_fb_d <= in_fb;
 end
 
 // **************************************************
@@ -197,7 +222,7 @@ end
 // B[1:0] → 4-bit : {B[1:0], B[1:0]}
 
 always @(posedge clk) begin
-    if (active_d) begin
+    if (in_fb_d) begin
         vga_r <= {pixel_data[7:5], pixel_data[7]};
         vga_g <= {pixel_data[4:2], pixel_data[4]};
         vga_b <= {pixel_data[1:0], pixel_data[1:0]};
@@ -225,7 +250,7 @@ reg [DATA_WIDTH-1:0] write_data_reg;
 reg [ADDR_WIDTH-1:0] read_addr_reg;
 
 // CPU-side framebuffer write address (auto-incrementing)
-reg [14:0] fb_wr_addr;
+reg [15:0] fb_wr_addr;
 
 assign s_axil_awready = s_axil_awready_reg;
 assign s_axil_wready  = s_axil_wready_reg;
@@ -244,7 +269,7 @@ always @(posedge clk) begin
         s_axil_bvalid_reg  <= 0;
         write_addr_reg     <= 0;
         write_data_reg     <= 0;
-        fb_wr_addr         <= 15'd0;
+        fb_wr_addr         <= 16'd0;
     end else begin
         // Address Handshake
         if (s_axil_awvalid && !s_axil_awready_reg && (!s_axil_bvalid_reg || s_axil_bready)) begin
@@ -268,14 +293,14 @@ always @(posedge clk) begin
 
             case (write_addr_reg[3:2])
                 2'b00: begin // FB_ADDR (0x00)
-                    fb_wr_addr <= write_data_reg[14:0];
+                    fb_wr_addr <= write_data_reg[15:0];
                 end
                 2'b01: begin // FB_DATA (0x04)
                     framebuffer[fb_wr_addr] <= write_data_reg[7:0];
                     if (fb_wr_addr < FB_SIZE - 1)
                         fb_wr_addr <= fb_wr_addr + 1'd1;
                     else
-                        fb_wr_addr <= 15'd0;
+                        fb_wr_addr <= 16'd0;
                 end
             endcase
         end else if (s_axil_bready && s_axil_bvalid_reg) begin
@@ -303,7 +328,7 @@ always @(posedge clk) begin
             s_axil_rvalid_reg <= 1;
 
             case (read_addr_reg[3:2])
-                2'b00: s_axil_rdata_reg <= {17'd0, fb_wr_addr};       // FB_ADDR
+                2'b00: s_axil_rdata_reg <= {16'd0, fb_wr_addr};       // FB_ADDR
                 2'b10: s_axil_rdata_reg <= {31'd0, in_vblank};        // FB_STATUS
                 default: s_axil_rdata_reg <= 32'd0;
             endcase
