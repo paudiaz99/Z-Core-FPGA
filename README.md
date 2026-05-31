@@ -27,7 +27,7 @@
 ## Block Diagram
 
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/fec3a0e0-5cef-46e4-a3fd-7f07b1387a11" alt="centered image">
+  <img src="https://github.com/user-attachments/assets/98914226-4635-45d5-9400-1545cf6fb7ab" alt="centered image">
   <br>
   <sup>Z-Core SoC Architecture.</sup>
 </div>
