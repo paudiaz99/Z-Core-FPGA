@@ -133,14 +133,14 @@ python3 upload.py /dev/ttyUSB0 hello.bin
 
 ```bash
 # Build DOOM binary
-cd software/doom_riscv/src/riscv/
+cd software/Z-Core-DOOM/src/riscv/
 make all
 
 # Upload DOOM code + WAD (two segments to SDRAM)
 cd software/
 python3 upload.py /dev/ttyUSB0 \
-    --segments doom_riscv/src/riscv/doom-zcore.bin@0x10000000 \
-               doom_riscv/doom1.wad@0x12010000 \
+    --segments Z-Core-DOOM/src/riscv/doom-zcore.bin@0x10000000 \
+               Z-Core-DOOM/doom1.wad@0x12010000 \
     --entry 0x10000000
 ```
 
@@ -154,7 +154,7 @@ python3 upload.py /dev/ttyUSB0 \
 | Upload + Monitor | `python3 upload.py /dev/ttyUSB0 myprogram.bin` |
 | Upload only | `python3 upload.py /dev/ttyUSB0 myprogram.bin -n` |
 | Clean build | `make clean` |
-| Build DOOM | `cd doom_riscv/src/riscv && make all` |
+| Build DOOM | `cd Z-Core-DOOM/src/riscv && make all` |
 
 ---
 
@@ -172,7 +172,7 @@ The `software/` directory contains examples compiled with the RISC-V GNU Toolcha
 | `pong` | Classic Pong via UART |
 | `multiplication` | RV32IM multiply/divide instruction test |
 | `sdram_test` | SDRAM read/write/byte-strobe test |
-| `doom_riscv/` | DOOM port for Z-Core (runs from SDRAM) |
+| `Z-Core-DOOM/` | DOOM port for Z-Core (runs from SDRAM) |
 
 ### Pong Game
 
@@ -283,7 +283,7 @@ The `software/` directory contains examples compiled with the RISC-V GNU Toolcha
 │   │   ├── boot_start.S           # Reset vector + trap handler
 │   │   ├── Makefile
 │   │   └── linker_boot.ld
-│   ├── doom_riscv/                # DOOM port for Z-Core
+│   ├── Z-Core-DOOM/               # DOOM port for Z-Core (submodule)
 │   │   ├── src/riscv/             # Z-Core-specific DOOM backend
 │   │   │   ├── zcore.lds          # Linker script (SDRAM target)
 │   │   │   ├── config.h           # Platform addresses
@@ -372,7 +372,7 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 
 - **[Alex Forencich](https://github.com/alexforencich)** — AXI-Lite interconnect and memory arbiter components from the [verilog-axi](https://github.com/alexforencich/verilog-axi) library.
 - **SDRAM Controller** — IS42S16320D controller core used in the SDRAM subsystem.
-- **DOOM RISC-V port** — originally by smunaut, adapted for Z-Core. ([doom_riscv](https://github.com/smunaut/doom_riscv))
+- **DOOM RISC-V port** — originally by smunaut, adapted for Z-Core. ([Z-Core-DOOM](https://github.com/paudiaz99/Z-CORE-DOOM))
 
 ---
 

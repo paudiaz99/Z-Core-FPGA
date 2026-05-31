@@ -1,0 +1,3 @@
+[submodule "software/Z-Core-DOOM"]
+	path = software/Z-Core-DOOM
+	url = https://github.com/paudiaz99/Z-CORE-DOOM.git

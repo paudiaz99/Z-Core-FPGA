@@ -107,7 +107,7 @@ The bootloader MIF files (`software/bootloader_byte{0-3}.mif`) are baked into th
 ### DOOM (SDRAM target)
 
 ```bash
-cd software/doom_riscv/src/riscv/
+cd software/Z-Core-DOOM/src/riscv/
 make clean && make all    # Produces doom-zcore.bin (~300 KB)
 ```
 
@@ -173,7 +173,7 @@ python3 upload.py /dev/ttyUSB0 my_program.bin --base 0x10000000
 sudo apt install freedoom
 # WAD is at: /usr/share/games/doom/freedoom1.wad
 ```
-If using FreeDOOM, update `WAD_SIZE` in `software/doom_riscv/src/riscv/config.h` to match its
+If using FreeDOOM, update `WAD_SIZE` in `software/Z-Core-DOOM/src/riscv/config.h` to match its
 actual size, and change `"doom1.wad"` to `"freedoom1.wad"` in `libc_backend.c`.
 
 **Option B — DOOM shareware v1.9 (id Software, freely distributable):**
@@ -195,20 +195,20 @@ Find `doom.wad` in the game install directory.
 
 ```bash
 # Build DOOM
-cd software/doom_riscv/src/riscv/
+cd software/Z-Core-DOOM/src/riscv/
 make all
 
 # Upload DOOM code + WAD to SDRAM (two segments)
 cd software/
 python3 upload.py /dev/ttyUSB0 \
-    --segments doom_riscv/src/riscv/doom-zcore.bin@0x10000000 \
-               doom_riscv/doom1.wad@0x12010000 \
+    --segments Z-Core-DOOM/src/riscv/doom-zcore.bin@0x10000000 \
+               Z-Core-DOOM/doom1.wad@0x12010000 \
     --entry 0x10000000
 
 # With high-speed baud (460800, ~4x faster — recommended):
 python3 upload.py /dev/ttyUSB0 \
-    --segments doom_riscv/src/riscv/doom-zcore.bin@0x10000000 \
-               doom_riscv/doom1.wad@0x12010000 \
+    --segments Z-Core-DOOM/src/riscv/doom-zcore.bin@0x10000000 \
+               Z-Core-DOOM/doom1.wad@0x12010000 \
     --entry 0x10000000 \
     --fast
 ```
@@ -324,7 +324,7 @@ void main(void) {
 }
 ```
 
-Use a linker script that places `.text` at `0x10000000` (see `software/doom_riscv/src/riscv/zcore.lds` for an example).
+Use a linker script that places `.text` at `0x10000000` (see `software/Z-Core-DOOM/src/riscv/zcore.lds` for an example).
 
 Upload with: `python3 upload.py /dev/ttyUSB0 big_program.bin --base 0x10000000`
 
@@ -342,8 +342,8 @@ cd software/
 
 # Recommended: use --fast to upload at 460800 baud (~1.5 min instead of ~7 min)
 python3 upload.py /dev/ttyUSB0 \
-    --segments doom_riscv/src/riscv/doom-zcore.bin@0x10000000 \
-               doom_riscv/doom1.wad@0x12010000 \
+    --segments Z-Core-DOOM/src/riscv/doom-zcore.bin@0x10000000 \
+               Z-Core-DOOM/doom1.wad@0x12010000 \
     --entry 0x10000000 \
     --fast
 ```
@@ -353,9 +353,9 @@ Wait for the bootloader to finish uploading and print `Jump 10000000`. DOOM will
 **Terminal 2 — Start the input driver:**
 
 ```bash
-python3 software/doom_riscv/doom_input.py /dev/ttyUSB0
+python3 software/Z-Core-DOOM/doom_input.py /dev/ttyUSB0
 # Or at 460800 if you used --fast above:
-python3 software/doom_riscv/doom_input.py /dev/ttyUSB0 --baud 460800
+python3 software/Z-Core-DOOM/doom_input.py /dev/ttyUSB0 --baud 460800
 ```
 
 The input driver puts your terminal into raw mode and forwards keypresses to DOOM. Press `q` or `Ctrl-C` to exit the input driver.
@@ -400,4 +400,4 @@ While DOOM runs, Terminal 1 prints a performance summary every 100 frames:
 
 `doom1.wad` is not included in this repository. See Section 5 ("Example: DOOM") for how to obtain it legally (DOOM shareware v1.9 or FreeDOOM).
 
-Place `doom1.wad` at `software/doom_riscv/doom1.wad` before uploading. The bootloader loads it directly from that path into SDRAM at `0x1201_0000`.
+Place `doom1.wad` at `software/Z-Core-DOOM/doom1.wad` before uploading. The bootloader loads it directly from that path into SDRAM at `0x1201_0000`.
