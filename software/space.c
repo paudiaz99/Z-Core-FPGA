@@ -11,6 +11,7 @@
 #include "libs/uart.h"
 #include "libs/vga.h"
 
+
 #define GPIO_LOW     (*((volatile unsigned int *)0x04001000))
 #define GPIO_DIR_LOW (*((volatile unsigned int *)0x04001008))
 
@@ -134,6 +135,15 @@ static int pup_weapon;        /* 0=none 1=MULTI 2=RAPID */
 static int pup_weapon_timer;  /* frames remaining        */
 static int pup_shield;        /* 1=shield active         */
 
+/* Shadow state for dirty-rect rendering (prev-frame positions) */
+static struct { short x; unsigned char y; } shad_stars[MAX_STARS];
+static struct { int x, y; unsigned char active; } shad_bul[MAX_BULLETS];
+static struct { int x, y; unsigned char active; } shad_enm[MAX_ENEMIES];
+static struct { int x, y; unsigned char active; } shad_expl[MAX_EXPL];
+static struct { short x, y; unsigned char active; } shad_pup[MAX_PUPS];
+static int shad_ship_x;
+static int shad_wave_pause;
+
 /* ═══════════════ DRAWING HELPERS ═══════════════ */
 
 static void draw_spr(int sx, int sy, const unsigned char *d,
@@ -141,7 +151,7 @@ static void draw_spr(int sx, int sy, const unsigned char *d,
 {
     for (int r = 0; r < h; r++) {
         int yy = sy + r;
-        if ((unsigned)yy >= (unsigned)VGA_HEIGHT) continue;
+        if (yy < GAME_TOP || (unsigned)yy >= (unsigned)VGA_HEIGHT) continue;
         unsigned char row = d[r];
         for (int c = 0; c < w; c++) {
             if (row & (1 << (w - 1 - c))) {
@@ -200,10 +210,12 @@ static void draw_expl(int cx, int cy, int t)
     for (int i = -s; i <= s; i++) {
         int px, py;
         px = cx + i; py = cy;
-        if ((unsigned)px < (unsigned)VGA_WIDTH && (unsigned)py < (unsigned)VGA_HEIGHT)
+        if ((unsigned)px < (unsigned)VGA_WIDTH &&
+            (unsigned)py < (unsigned)VGA_HEIGHT && py >= GAME_TOP)
             vga_set_pixel(px, py, c);
         px = cx; py = cy + i;
-        if ((unsigned)px < (unsigned)VGA_WIDTH && (unsigned)py < (unsigned)VGA_HEIGHT)
+        if ((unsigned)px < (unsigned)VGA_WIDTH &&
+            (unsigned)py < (unsigned)VGA_HEIGHT && py >= GAME_TOP)
             vga_set_pixel(px, py, c);
     }
     if (s > 1) {
@@ -212,7 +224,8 @@ static void draw_expl(int cx, int cy, int t)
             int ddx = (k & 1) ? d : -d;
             int ddy = (k & 2) ? d : -d;
             int ppx = cx + ddx, ppy = cy + ddy;
-            if ((unsigned)ppx < (unsigned)VGA_WIDTH && (unsigned)ppy < (unsigned)VGA_HEIGHT)
+            if ((unsigned)ppx < (unsigned)VGA_WIDTH &&
+                (unsigned)ppy < (unsigned)VGA_HEIGHT && ppy >= GAME_TOP)
                 vga_set_pixel(ppx, ppy, c);
         }
     }
@@ -226,11 +239,18 @@ static void hline(int x, int y, int w, unsigned char c)
         VGA_FB_DATA = c;
 }
 
-static void clear_game_area(void)
+/* Erase a rectangle, clamped to the game area [GAME_TOP, VGA_HEIGHT). */
+static void erase_rect(int x0, int y0, int w, int h)
 {
-    VGA_FB_ADDR = (unsigned)(GAME_TOP * VGA_WIDTH);
-    for (int i = GAME_TOP * VGA_WIDTH; i < VGA_WIDTH * VGA_HEIGHT; i++)
-        VGA_FB_DATA = VGA_BLACK;
+    int y1 = y0 < GAME_TOP ? GAME_TOP : y0;
+    int y2 = y0 + h < VGA_HEIGHT ? y0 + h : VGA_HEIGHT;
+    int x1 = x0 < 0 ? 0 : x0;
+    int x2 = x0 + w < VGA_WIDTH ? x0 + w : VGA_WIDTH;
+    if (x1 >= x2 || y1 >= y2) return;
+    for (int y = y1; y < y2; y++) {
+        VGA_FB_ADDR = (unsigned)(y * VGA_WIDTH + x1);
+        for (int x = x1; x < x2; x++) VGA_FB_DATA = VGA_BLACK;
+    }
 }
 
 /* ═══════════════ INIT / WAVE ═══════════════ */
@@ -267,6 +287,18 @@ static void reset_game(void)
     init_stars();
     start_wave(1);
     vga_fill(VGA_BLACK);
+
+    /* Shadow state: skip all erases on first rendered frame */
+    for (int i = 0; i < MAX_STARS; i++) {
+        shad_stars[i].x = stars[i].x;
+        shad_stars[i].y = 255; /* off-screen sentinel */
+    }
+    for (int i = 0; i < MAX_BULLETS; i++) shad_bul[i].active  = 0;
+    for (int i = 0; i < MAX_ENEMIES; i++) shad_enm[i].active  = 0;
+    for (int i = 0; i < MAX_EXPL;   i++) shad_expl[i].active = 0;
+    for (int i = 0; i < MAX_PUPS;   i++) shad_pup[i].active  = 0;
+    shad_ship_x    = ship_x;
+    shad_wave_pause = 0;
 }
 
 /* Returns 1 if an enemy was placed, 0 if all slots are full. */
@@ -580,74 +612,128 @@ static void render_hud(int fps)
 
 static void render_game(void)
 {
-    clear_game_area();
+    /* ═══ PHASE 1: Erase all objects at previous-frame positions ═══ */
 
-    /* ── Stars (3 brightness tiers) ── */
+    /* Stars */
+    for (int i = 0; i < MAX_STARS; i++) {
+        int sx = (int)shad_stars[i].x, sy = (int)shad_stars[i].y;
+        if ((unsigned)sy < (unsigned)VGA_HEIGHT && sy >= GAME_TOP &&
+            (unsigned)sx < (unsigned)VGA_WIDTH)
+            vga_set_pixel(sx, sy, VGA_BLACK);
+    }
+
+    /* Power-ups (3×3 bounding box) */
+    for (int i = 0; i < MAX_PUPS; i++) {
+        if (!shad_pup[i].active) continue;
+        erase_rect((int)shad_pup[i].x, (int)shad_pup[i].y, 3, 3);
+    }
+
+    /* Bullets (1×4) */
+    for (int i = 0; i < MAX_BULLETS; i++) {
+        if (!shad_bul[i].active) continue;
+        erase_rect(shad_bul[i].x, shad_bul[i].y, 1, 4);
+    }
+
+    /* Enemies (ENM_W × ENM_H) */
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        if (!shad_enm[i].active) continue;
+        erase_rect(shad_enm[i].x, shad_enm[i].y, ENM_W, ENM_H);
+    }
+
+    /* Explosions (max radius 8 → 19×19 bounding box) */
+    for (int i = 0; i < MAX_EXPL; i++) {
+        if (!shad_expl[i].active) continue;
+        erase_rect(shad_expl[i].x - 9, shad_expl[i].y - 9, 19, 19);
+    }
+
+    /* Ship: SHIP_W+2 wide (shield ring ±1), SHIP_H+3 tall (SHIP_Y−1 to SHIP_Y+SHIP_H+1) */
+    erase_rect(shad_ship_x - 1, SHIP_Y - 1, SHIP_W + 2, SHIP_H + 3);
+
+    /* Wave announcement */
+    if (shad_wave_pause > 0) {
+        int cy = VGA_HEIGHT / 2 - 5;
+        erase_rect(24, cy - 3, VGA_WIDTH - 48, 18);
+    }
+
+    /* ═══ PHASE 2: Draw all objects at current positions ═══ */
+
+    /* Stars */
     for (int i = 0; i < MAX_STARS; i++) {
         unsigned char c;
-        if      (stars[i].spd == 3) c = (frame & 1) ? VGA_WHITE      : VGA_LIGHT_GRAY;
+        if      (stars[i].spd == 3) c = (frame & 1) ? VGA_WHITE : VGA_LIGHT_GRAY;
         else if (stars[i].spd == 2) c = VGA_LIGHT_GRAY;
         else                        c = VGA_DARK_GRAY;
         int sx = (int)stars[i].x, sy = (int)stars[i].y;
-        if ((unsigned)sx < (unsigned)VGA_WIDTH && (unsigned)sy < (unsigned)VGA_HEIGHT)
+        if ((unsigned)sx < (unsigned)VGA_WIDTH &&
+            (unsigned)sy < (unsigned)VGA_HEIGHT && sy >= GAME_TOP)
             vga_set_pixel(sx, sy, c);
+        shad_stars[i].x = (short)sx;
+        shad_stars[i].y = (unsigned char)sy;
     }
 
-    /* ── Power-up pickups (blinking diamond) ── */
+    /* Power-up pickups (blinking diamond) */
     for (int i = 0; i < MAX_PUPS; i++) {
-        if (!pups[i].active) continue;
+        if (!pups[i].active) { shad_pup[i].active = 0; continue; }
         int px = (int)pups[i].x, py = (int)pups[i].y;
-        if ((unsigned)py >= (unsigned)VGA_HEIGHT) continue;
+        if ((unsigned)py >= (unsigned)VGA_HEIGHT) { shad_pup[i].active = 0; continue; }
         unsigned char col;
         switch (pups[i].type) {
             case PUP_MULTI:  col = VGA_CYAN;   break;
             case PUP_RAPID:  col = VGA_GREEN;  break;
             default:         col = VGA_YELLOW; break;
         }
-        vga_set_pixel(px + 1, py,     col);         /* always show top */
+        vga_set_pixel(px + 1, py, col);
         if (frame & 4) {
             vga_set_pixel(px,     py + 1, col);
             vga_set_pixel(px + 2, py + 1, col);
         }
         vga_set_pixel(px + 1, py + 1, col);
         vga_set_pixel(px + 1, py + 2, col);
+        shad_pup[i].x = (short)px; shad_pup[i].y = (short)py; shad_pup[i].active = 1;
     }
 
-    /* ── Bullets ── */
+    /* Bullets */
     for (int i = 0; i < MAX_BULLETS; i++) {
-        if (!bullets[i].active) continue;
+        if (!bullets[i].active) { shad_bul[i].active = 0; continue; }
         for (int dy = 0; dy < 4; dy++) {
             int yy = bullets[i].y + dy;
             if ((unsigned)yy < (unsigned)VGA_HEIGHT && yy >= GAME_TOP)
                 vga_set_pixel(bullets[i].x, yy, dy < 2 ? VGA_WHITE : VGA_YELLOW);
         }
+        shad_bul[i].x = bullets[i].x; shad_bul[i].y = bullets[i].y; shad_bul[i].active = 1;
     }
 
-    /* ── Enemies ── */
+    /* Enemies */
     for (int i = 0; i < MAX_ENEMIES; i++) {
-        if (!enemies[i].active) continue;
+        if (!enemies[i].active) { shad_enm[i].active = 0; continue; }
         unsigned char ec;
         const unsigned char *sp;
         switch (enemies[i].type) {
-            case 1:  ec = VGA_MAGENTA;     sp = enm2_spr; break;
-            case 2:  ec = VGA_RED;         sp = enm3_spr; break;
-            default: ec = VGA_RGB(7,2,0);  sp = enm1_spr; break;
+            case 1:  ec = VGA_MAGENTA;    sp = enm2_spr; break;
+            case 2:  ec = VGA_RED;        sp = enm3_spr; break;
+            default: ec = VGA_RGB(7,2,0); sp = enm1_spr; break;
         }
         draw_spr(enemies[i].x, enemies[i].y, sp, ENM_W, ENM_H, ec);
+        shad_enm[i].x = enemies[i].x; shad_enm[i].y = enemies[i].y; shad_enm[i].active = 1;
     }
 
-    /* ── Explosions ── */
-    for (int i = 0; i < MAX_EXPL; i++)
-        if (expls[i].timer > 0)
+    /* Explosions */
+    for (int i = 0; i < MAX_EXPL; i++) {
+        if (expls[i].timer > 0) {
             draw_expl(expls[i].x, expls[i].y, 8 - expls[i].timer);
+            shad_expl[i].x = expls[i].x; shad_expl[i].y = expls[i].y;
+            shad_expl[i].active = 1;
+        } else {
+            shad_expl[i].active = 0;
+        }
+    }
 
-    /* ── Player ship ── */
+    /* Player ship */
     {
         int flicker = invuln > 0 && (frame & 8);
         unsigned char ship_col = flicker ? VGA_RGB(0, 2, 1) : VGA_CYAN;
         unsigned char ckpt_col = flicker ? VGA_RGB(2, 2, 1) : VGA_WHITE;
 
-        /* Shield ring */
         if (pup_shield) {
             vga_set_pixel(ship_x - 1,      SHIP_Y + 2,      VGA_YELLOW);
             vga_set_pixel(ship_x + SHIP_W, SHIP_Y + 2,      VGA_YELLOW);
@@ -655,7 +741,6 @@ static void render_game(void)
             vga_set_pixel(ship_x + 3,      SHIP_Y + SHIP_H, VGA_YELLOW);
         }
 
-        /* Engine exhaust */
         int ey = SHIP_Y + SHIP_H;
         if ((unsigned)ey < (unsigned)VGA_HEIGHT) {
             unsigned char f1 = (frame & 2) ? VGA_RGB(7,5,0) : VGA_RGB(7,3,0);
@@ -672,14 +757,14 @@ static void render_game(void)
         draw_spr(ship_x, SHIP_Y, ship_spr, SHIP_W, SHIP_H, ship_col);
         vga_set_pixel(ship_x + 3, SHIP_Y,     ckpt_col);
         vga_set_pixel(ship_x + 3, SHIP_Y + 1, ckpt_col);
+        shad_ship_x = ship_x;
     }
 
-    /* ── Between-wave announcement ── */
+    /* Between-wave announcement */
     if (wave_pause > 0 && (frame & 4)) {
         int cy = VGA_HEIGHT / 2 - 5;
         int bx = 24;
         vga_fill_rect(bx, cy - 3, VGA_WIDTH - bx * 2, 18, VGA_RGB(0, 0, 2));
-        /* "WAVE" letters then next wave number */
         int lx = VGA_WIDTH / 2 - 10;
         draw_letter(lx,      cy, 0, VGA_YELLOW);  /* W */
         draw_letter(lx + 4,  cy, 1, VGA_YELLOW);  /* A */
@@ -687,6 +772,7 @@ static void render_game(void)
         draw_letter(lx + 12, cy, 3, VGA_YELLOW);  /* E */
         draw_num_2x(lx + 18, cy - 1, wave_num + 1, VGA_WHITE);
     }
+    shad_wave_pause = wave_pause;
 }
 
 /* ═══════════════ MAIN ═══════════════ */

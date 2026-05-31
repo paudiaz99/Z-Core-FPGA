@@ -44,11 +44,14 @@ MAPS = $(PROGS:=.map)
 
 all: $(BINS) $(HEXS) $(MIFS) $(ASMS) $(LSTS) info
 
-UART_DIR = libs
+# Update: uart is now in libs/
+UART_DIR = ../libs
 CFLAGS += -I$(UART_DIR)
 
 # Link
-%.elf: %.o uart.o start.o linker.ld
+LDSCRIPT = $(if $(APP),linker_app.ld,linker.ld)
+
+%.elf: %.o uart.o start.o $(LDSCRIPT)
 	@echo "Linking $@..."
 	$(LD) $(LDFLAGS) -Map=$*.map $< uart.o start.o -o $@
 
