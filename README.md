@@ -71,7 +71,7 @@ The system supports two execution modes: small programs run directly from on-chi
 | ISA | RV32IM + Zicsr |
 | Instruction Cache | 32 KB direct-mapped (8192 entries) |
 | Data Cache | 32 KB 2-way set-associative (write-back, write-allocate) |
-| Branch Predictor | Gshare / tournament predictor |
+| Branch Predictor | 2-Bit Branch Predictor |
 | BRAM | 16 KB on-chip (bootloader + small apps) |
 | SDRAM | 64 MB IS42S16320D @ 100 MHz (via AXI-CDC bridge) |
 | Peripherals | UART, GPIO (16-bit), VGA (320×200 RGB332), 64-bit Timer |
