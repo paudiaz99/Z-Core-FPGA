@@ -379,4 +379,4 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 ## References
 
 - [Z-Core Processor Repository](https://github.com/paudiaz99/Z-Core)
-- [DE10-Lite User Manual](https://ftp.intel.com/Public/Pub/fpgaup/pub/Intel_Material/Boards/DE10-Lite/DE10_Lite_User_Manual.pdf)
+- [DE10-Lite User Manual](https://faculty-web.msoe.edu/johnsontimoj/Common/FILES/DE10_Lite_User_Manual.pdf)
