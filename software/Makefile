@@ -44,7 +44,7 @@ MAPS = $(PROGS:=.map)
 
 all: $(BINS) $(HEXS) $(MIFS) $(ASMS) $(LSTS) info
 
-UART_DIR = /libs
+UART_DIR = libs
 CFLAGS += -I$(UART_DIR)
 
 # Link
