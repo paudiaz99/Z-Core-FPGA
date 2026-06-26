@@ -42,7 +42,7 @@
 </div>
 
 
-> **Note**: For Z-Core detailed processor architecture explanation, pipeline implementation, verification methodology, and ISA compliance documentation, refer to the main **[Z-Core repository](https://github.com/paudiaz99/Z-Core)**.
+> **Note**: For Z-Core detailed processor architecture explanation, pipeline implementation, verification methodology, and ISA compliance documentation, refer to the main **[Z-Core repository](https://github.com/paudiaz99/Z-Core)**, or the following website, where I dive into the details of the processor: https://paudiazcuesta.com/work/z-core/.
 
 ---
 
@@ -55,9 +55,9 @@ The system supports two execution modes: small programs run directly from on-chi
 ---
 
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/72eb1558-ab39-4f42-9cb9-ddd9adee80e5" alt="centered image">
+  <video src="https://github.com/user-attachments/assets/7ed1b9ca-17da-4339-a832-d4b44bc0be02" width="100%" autoplay loop muted playsinline></video>
   <br>
-  <sup>Z-Core Running VGA Test @ 60 FPS.</sup>
+  <sup>Z-Core Running Doom @ 10 FPS (320x200).</sup>
 </div>
 
 ---
@@ -81,7 +81,7 @@ The system supports two execution modes: small programs run directly from on-chi
 
 ## Performance
 
-All measurements on DE10-Lite (MAX 10) at 50 MHz.
+All measurements on DE10-Lite (MAX 10) at 50 MHz. For a detailed performance analysis on Z-Core, visit: https://paudiazcuesta.com/posts/z-core-performance/.
 
 ### CoreMark
 
@@ -89,13 +89,13 @@ All measurements on DE10-Lite (MAX 10) at 50 MHz.
 |--------|-------|
 | CoreMark/MHz | **3.06** |
 
-### DOOM (320×200, `doom1.wad` shareware)
+### DOOM (300×200, `doom1.wad` shareware)
 
 | Configuration | FPS |
 |---------------|-----|
 | No cache (SDRAM only) | < 1 FPS |
 | 32 KB Instruction Cache only | ~3 FPS |
-| 32 KB I-Cache + 32 KB 2-way D-Cache | **~14 FPS** |
+| 32 KB I-Cache + 32 KB 2-way D-Cache | **~11 FPS** |
 | 32 KB I-Cache + 32 KB 2-way D-Cache (lower resolution) | **~20 FPS** |
 
 ### Memory Bandwidth (STREAM benchmark)
