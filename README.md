@@ -27,7 +27,7 @@
 ## Block Diagram
 
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/fec3a0e0-5cef-46e4-a3fd-7f07b1387a11" alt="centered image">
+  <img src="https://github.com/user-attachments/assets/98914226-4635-45d5-9400-1545cf6fb7ab" alt="centered image">
   <br>
   <sup>Z-Core SoC Architecture.</sup>
 </div>
@@ -42,7 +42,7 @@
 </div>
 
 
-> **Note**: For Z-Core detailed processor architecture explanation, pipeline implementation, verification methodology, and ISA compliance documentation, refer to the main **[Z-Core repository](https://github.com/paudiaz99/Z-Core)**.
+> **Note**: For Z-Core detailed processor architecture explanation, pipeline implementation, verification methodology, and ISA compliance documentation, refer to the main **[Z-Core repository](https://github.com/paudiaz99/Z-Core)**, or the following website, where I dive into the details of the processor: https://paudiazcuesta.com/work/z-core/.
 
 ---
 
@@ -57,9 +57,9 @@ The Quartus project, SDRAM IP, software and matched Linux boot files are include
 ---
 
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/72eb1558-ab39-4f42-9cb9-ddd9adee80e5" alt="centered image">
+  <video src="https://github.com/user-attachments/assets/7ed1b9ca-17da-4339-a832-d4b44bc0be02" width="100%" autoplay loop muted playsinline></video>
   <br>
-  <sup>Z-Core Running VGA Test @ 60 FPS.</sup>
+  <sup>Z-Core Running Doom @ 10 FPS (320x200).</sup>
 </div>
 
 ---
@@ -74,7 +74,7 @@ The Quartus project, SDRAM IP, software and matched Linux boot files are include
 | Privilege | Machine/User modes; no MMU |
 | Instruction Cache | 16 KB direct-mapped (4096 entries) |
 | Data Cache | 32 KB 2-way set-associative (write-back, write-allocate) |
-| Branch Predictor | Gshare / tournament predictor |
+| Branch Predictor | 2-Bit Branch Predictor |
 | BRAM | 16 KB on-chip (bootloader + small apps) |
 | SDRAM | 64 MB IS42S16320D @ 100 MHz (via AXI-CDC bridge) |
 | Peripherals | UART, GPIO (16-bit), VGA (320×200 RGB332), 64-bit Timer |
@@ -85,7 +85,7 @@ The Quartus project, SDRAM IP, software and matched Linux boot files are include
 
 ## Performance
 
-All measurements on DE10-Lite (MAX 10) at 50 MHz running bare-metal.
+All measurements on DE10-Lite (MAX 10) at 50 MHz running bare-metal. For a detailed performance analysis on Z-Core, visit: https://paudiazcuesta.com/posts/z-core-performance/.
 
 ### CoreMark
 
@@ -93,13 +93,13 @@ All measurements on DE10-Lite (MAX 10) at 50 MHz running bare-metal.
 |--------|-------|
 | CoreMark/MHz | **3.24** |
 
-### DOOM (320×200, `doom1.wad` shareware)
+### DOOM (300×200, `doom1.wad` shareware)
 
 | Configuration | FPS |
 |---------------|-----|
 | No cache (SDRAM only) | < 1 FPS |
 | 32 KB Instruction Cache only | ~3 FPS |
-| 32 KB I-Cache + 32 KB 2-way D-Cache | **~14 FPS** |
+| 32 KB I-Cache + 32 KB 2-way D-Cache | **~11 FPS** |
 | 32 KB I-Cache + 32 KB 2-way D-Cache (lower resolution) | **~20 FPS** |
 
 ### Memory Bandwidth (STREAM benchmark)
@@ -366,4 +366,4 @@ Third-party and vendor components (CoreMark, STREAM, lmbench, DOOM engine, Foren
 ## References
 
 - [Z-Core Processor Repository](https://github.com/paudiaz99/Z-Core)
-- [DE10-Lite User Manual](https://ftp.intel.com/Public/Pub/fpgaup/pub/Intel_Material/Boards/DE10-Lite/DE10_Lite_User_Manual.pdf)
+- [DE10-Lite User Manual](https://faculty-web.msoe.edu/johnsontimoj/Common/FILES/DE10_Lite_User_Manual.pdf)
