@@ -1,0 +1,17 @@
+[
+  {
+    "file": "dhry-c.shar",
+    "url": "https://www.netlib.org/benchmark/dhry-c",
+    "sha256": "038a7e9169787125c3451a6c941f3aca5db2d2f3863871afcdce154ef17f4e3e"
+  },
+  {
+    "file": "whetstone.c",
+    "url": "https://www.netlib.org/benchmark/whetstone.c",
+    "sha256": "333e4ceca042c146f63eec605573d16ae8b07166cbc44a17bec1ea97c6f1efbf"
+  },
+  {
+    "file": "stream.c",
+    "url": "https://www.cs.virginia.edu/stream/FTP/Code/stream.c",
+    "sha256": "a52bae5e175bea3f7832112af9c085adab47117f7d2ce219165379849231692b"
+  }
+]

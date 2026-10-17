@@ -47,6 +47,8 @@ localparam JAL_INST = 7'b1101111;
 localparam LUI_INST = 7'b0110111;
 localparam AUIPC_INST = 7'b0010111;
 
+localparam ATOMIC_INST = 7'b0101111;
+
 // Function3 Codes
 localparam F3_ADD_SUB_LB_JALR_SB_BEQ_MUL = 3'b000;
 localparam F3_SLL_LH_SH_BNE_MULH = 3'b001;
@@ -82,7 +84,6 @@ localparam INST_DIV = 5'd20;
 localparam INST_DIVU = 5'd21;
 localparam INST_REM = 5'd22;
 localparam INST_REMU = 5'd23;
-
 
 always @(*) begin
     case(alu_op)
@@ -137,6 +138,7 @@ always @(*) begin
         JAL_INST: alu_inst_type = INST_ADD; // JAL uses ADD
         LUI_INST: alu_inst_type = INST_ADD; // LUI uses ADD
         AUIPC_INST: alu_inst_type = INST_ADD; // AUIPC uses ADD
+        ATOMIC_INST: alu_inst_type = INST_ADD;
         default: alu_inst_type = 5'bxxxxx; // Invalid
     endcase
 

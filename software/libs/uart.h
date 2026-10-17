@@ -32,7 +32,6 @@ SOFTWARE.
 #define UART_CTRL     (*((volatile unsigned int *)(UART_BASE + 0x0C)))
 #define UART_BAUD_DIV (*((volatile unsigned int *)(UART_BASE + 0x10)))
 
-// STATUS register bits
 #define UART_STAT_TX_EMPTY  0x01
 #define UART_STAT_TX_BUSY   0x02
 #define UART_STAT_RX_VALID  0x04
@@ -46,4 +45,4 @@ void uart_puthex(unsigned int val);
 void uart_putint(int val);
 void uart_set_baud(unsigned int divisor);
 
-#endif // UART_H
+#endif

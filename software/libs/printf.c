@@ -29,7 +29,7 @@ SOFTWARE.
 int uvprintf(const char *fmt, va_list ap)
 {
     int count = 0;
-    char numbuf[24]; /* enough for 64-bit in any base + sign */
+    char numbuf[24];
 
     while (*fmt) {
         char ch = *fmt++;
@@ -39,7 +39,6 @@ int uvprintf(const char *fmt, va_list ap)
             continue;
         }
 
-        /* ---- flags ---- */
         int left = 0, zero = 0, plus = 0, space = 0;
         for (;;) {
             char f = *fmt;
@@ -51,19 +50,15 @@ int uvprintf(const char *fmt, va_list ap)
             fmt++;
         }
 
-        /* ---- field width ---- */
         int width = 0;
         while (*fmt >= '0' && *fmt <= '9')
             width = width * 10 + (*fmt++ - '0');
 
-        /* ---- length modifier ---- */
-        int lng = 0; /* 0 = int, 1 = long, 2 = long long */
+        int lng = 0;
         while (*fmt == 'l') { lng++; fmt++; }
 
         char conv = *fmt++;
 
-        /* Output assembly. For numeric conversions we build digits into
-           numbuf (right to left); for %c/%s we point at the source. */
         const char *out = numbuf;
         int outlen = 0;
         char sign = 0;
@@ -117,7 +112,6 @@ int uvprintf(const char *fmt, va_list ap)
             is_num = 1;
             break;
         default:
-            /* unknown conversion: emit literally */
             uart_putc('%');
             uart_putc(conv);
             count += 2;
@@ -134,7 +128,6 @@ int uvprintf(const char *fmt, va_list ap)
             outlen = len;
         }
 
-        /* ---- padding ---- */
         int signlen = sign ? 1 : 0;
         int pad = width - (outlen + signlen);
         if (pad < 0) pad = 0;

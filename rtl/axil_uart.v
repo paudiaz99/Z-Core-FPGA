@@ -429,7 +429,18 @@ always @(posedge clk) begin
                     s_axil_rdata_reg <= {24'd0, rx_data};
                     // Clear rx_valid after read (handled separately)
                 end
-                3'b010: s_axil_rdata_reg <= {28'd0, rx_error, rx_valid, tx_busy, tx_empty}; // STATUS
+                // STATUS. tx_empty/tx_busy are only updated by the TX FSM
+                // when it sees tx_start in TX_IDLE, which is at least a cycle
+                // after the AXI write that set tx_start lands. A status read
+                // arriving in that window would see a stale "empty", so a
+                // caller that writes then polls would send the next byte on
+                // top of the one in flight and drop characters.
+                //
+                // Fold the pending tx_start into the flags so the transmitter
+                // never reports itself idle with a byte already queued.
+                3'b010: s_axil_rdata_reg <= {28'd0, rx_error, rx_valid,
+                                             tx_busy  | tx_start,
+                                             tx_empty & ~tx_start}; // STATUS
                 3'b011: s_axil_rdata_reg <= {30'd0, rx_en, tx_en};    // CTRL
                 3'b100: s_axil_rdata_reg <= {16'd0, baud_div};        // BAUD_DIV
                 default: s_axil_rdata_reg <= 32'd0;

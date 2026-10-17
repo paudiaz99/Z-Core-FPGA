@@ -1,26 +1,44 @@
-/*
+//=============================================================================
+// AXI4-Lite to SDRAM Bridge — Random Access Mode (v3)
+//=============================================================================
+// True random-access bridge for Z-Core SoC.
+//
+// For every AXI transaction the bridge:
+//   1. Latches the AXI address and data.
+//   2. Pulses WR_LOAD / RD_LOAD to set the SDRAM address *and* clear
+//      the FIFO (the Terasic Sdram_Control uses LOAD as async FIFO clear).
+//   3. Waits for FIFO recovery (aclr needs ~4 cycles before FIFO works).
+//   4. Pushes / pops two 16-bit words (= one 32-bit AXI word).
+//   5. Waits for the controller to drain/fill the FIFO.
+//
+// Byte-strobe partial writes (wstrb != 4'hF) use a read-modify-write cycle.
+//
+// FIFO READ TIMING (lpm_showahead="OFF", registered output):
+//   The dcfifo provides data on q[] ONE rdclk cycle after rdreq.
+//   Additionally, sdram_rd is a REGISTERED output from this module, so
+//   the FIFO doesn't see rdreq until one cycle after the bridge sets it.
+//   Total latency: 2 cycles from bridge asserting sdram_rd to valid q[].
+//
+//   The read pipeline accounts for this with 4 states:
+//     POP_LO  : sdram_rd <= 1          (request word 0)
+//     POP_HI  : sdram_rd <= 1          (request word 1; FIFO sees req 0)
+//     LATCH_LO: read_lo <= q[]         (word 0 now valid; FIFO sees req 1)
+//     LATCH_HI: rdata <= {q[], read_lo}(word 1 now valid)
+//
+// FIFO WRITE TIMING:
+//   sdram_wr and sdram_wr_data are both registered, so they arrive at the
+//   FIFO together on the same clock edge. No timing issue for writes.
+//
+// CONTROLLER INTERACTION:
+//   - WR_LENGTH is held at 9'd2 permanently (after init). The scheduling
+//     guard (rusedw >= 2) prevents spurious writes when the FIFO is empty.
+//   - RD_LENGTH is dynamic (0 when idle, 2 during active read) to prevent
+//     the controller from auto-scheduling spurious reads after FIFO drain.
+//
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2025–2026 Pau Díaz Cuesta
+//=============================================================================
 
-Copyright (c) 2025 Pau Díaz Cuesta
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-*/
 module axi_sdram_bridge #(
     parameter AXI_ADDR_WIDTH    = 26,
     parameter AXI_DATA_WIDTH    = 32,

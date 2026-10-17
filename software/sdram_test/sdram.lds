@@ -1,4 +1,3 @@
-/* Minimal SDRAM linker script for Z-Core test programs */
 MEMORY
 {
     SDRAM (rwx) : ORIGIN = 0x10000000, LENGTH = 0x00900000

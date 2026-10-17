@@ -1,4 +1,3 @@
-# Makefile for Z-Core Bootloader
 
 PREFIX   = riscv32-unknown-elf-
 CC       = $(PREFIX)gcc
@@ -14,7 +13,7 @@ ASFLAGS  = $(ARCH)
 LDFLAGS  = -T linker_boot.ld --gc-sections
 
 TARGET   = bootloader
-MIF_OUT  = ..
+MIF_OUT  = .
 
 OBJS     = boot_start.o bootloader.o uart.o
 
@@ -45,7 +44,7 @@ $(TARGET).lst: $(TARGET).elf
 	$(OBJDUMP) -d -S $< > $@
 
 mif: $(TARGET).elf
-	python3 ../elf2hex.py $< $(MIF_OUT)/$(TARGET).mif 4096
+	python3 ../../scripts/elf2hex.py $< $(MIF_OUT)/$(TARGET).mif 4096
 
 clean:
 	rm -f *.o *.elf *.bin *.lst *.map

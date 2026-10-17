@@ -74,10 +74,20 @@ module axil_vga #(
 // 0x00: FB_ADDR   [R/W] - Framebuffer write address (0..63999)
 // 0x04: FB_DATA   [W]   - Write pixel color, auto-increment addr
 // 0x08: FB_STATUS [R]   - Bit 0: in vertical blanking
+// 0x0C: FB_DATA4  [W]   - Write FOUR packed pixels, addr += 4
+//
+// FB_DATA4 exists because the blit was 42% of a frame: 64000 uncached MMIO
+// writes, one per pixel, each a full AXI round trip. Packing four RGB332
+// pixels into one 32-bit write cuts that to 16000 transactions.
+// Byte 0 goes to the lowest address, i.e. the natural little-endian order of
+// a uint32_t read from a byte framebuffer.
+//
+// Requires FB_ADDR to be 4-aligned; the low two bits are ignored.
 
 localparam REG_ADDR   = 3'b000;  // 0x00
 localparam REG_DATA   = 3'b001;  // 0x04
 localparam REG_STATUS = 3'b010;  // 0x08
+localparam REG_DATA4  = 3'b011;  // 0x0C
 
 // **************************************************
 //    VGA Timing — 640x480 @ 60 Hz, 25 MHz pixel clk
@@ -108,7 +118,15 @@ localparam FB_SIZE = FB_WIDTH * FB_HEIGHT;  // 64000
 //  Port A — CPU write  (system clock)
 //  Port B — VGA read   (system clock)
 
-(* ramstyle = "M9K" *) reg [7:0] framebuffer [0:FB_SIZE-1];
+// Split into four byte-lane banks so that four CONSECUTIVE pixels live in
+// four different memories and can therefore be written in a single cycle.
+// Pixel p lives in bank p[1:0] at index p>>2. Total storage is unchanged.
+localparam FB_BANK = FB_SIZE / 4;   // 16000 entries per bank
+
+(* ramstyle = "M9K" *) reg [7:0] fb0 [0:FB_BANK-1];
+(* ramstyle = "M9K" *) reg [7:0] fb1 [0:FB_BANK-1];
+(* ramstyle = "M9K" *) reg [7:0] fb2 [0:FB_BANK-1];
+(* ramstyle = "M9K" *) reg [7:0] fb3 [0:FB_BANK-1];
 
 // **************************************************
 //        25 MHz pixel clock enable
@@ -202,11 +220,24 @@ wire [15:0] fb_rd_addr = in_fb
     ? ({1'b0, fb_y, 8'd0} + {2'd0, fb_y, 6'd0} + {7'd0, fb_x})
     : 16'd0;
 
-// Registered read — 1-cycle latency
-reg [7:0] pixel_data;
+// Registered read — 1-cycle latency. All four banks are read in parallel and
+// the lane is selected afterwards, so the bank select must be delayed to
+// match the RAM's registered output.
+wire [13:0] fb_rd_idx = fb_rd_addr[15:2];
+
+reg [7:0] fb_q0, fb_q1, fb_q2, fb_q3;
+reg [1:0] fb_rd_lane_d;
 always @(posedge clk) begin
-    pixel_data <= framebuffer[fb_rd_addr];
+    fb_q0 <= fb0[fb_rd_idx];
+    fb_q1 <= fb1[fb_rd_idx];
+    fb_q2 <= fb2[fb_rd_idx];
+    fb_q3 <= fb3[fb_rd_idx];
+    fb_rd_lane_d <= fb_rd_addr[1:0];
 end
+
+wire [7:0] pixel_data = (fb_rd_lane_d == 2'd0) ? fb_q0 :
+                        (fb_rd_lane_d == 2'd1) ? fb_q1 :
+                        (fb_rd_lane_d == 2'd2) ? fb_q2 : fb_q3;
 
 // Delay in_fb flag to match read latency
 reg in_fb_d;
@@ -295,10 +326,25 @@ always @(posedge clk) begin
                 2'b00: begin // FB_ADDR (0x00)
                     fb_wr_addr <= write_data_reg[15:0];
                 end
-                2'b01: begin // FB_DATA (0x04)
-                    framebuffer[fb_wr_addr] <= write_data_reg[7:0];
+                2'b01: begin // FB_DATA (0x04) — one pixel
+                    case (fb_wr_addr[1:0])
+                        2'd0: fb0[fb_wr_addr[15:2]] <= write_data_reg[7:0];
+                        2'd1: fb1[fb_wr_addr[15:2]] <= write_data_reg[7:0];
+                        2'd2: fb2[fb_wr_addr[15:2]] <= write_data_reg[7:0];
+                        2'd3: fb3[fb_wr_addr[15:2]] <= write_data_reg[7:0];
+                    endcase
                     if (fb_wr_addr < FB_SIZE - 1)
                         fb_wr_addr <= fb_wr_addr + 1'd1;
+                    else
+                        fb_wr_addr <= 16'd0;
+                end
+                2'b11: begin // FB_DATA4 (0x0C) — four pixels, one cycle
+                    fb0[fb_wr_addr[15:2]] <= write_data_reg[7:0];
+                    fb1[fb_wr_addr[15:2]] <= write_data_reg[15:8];
+                    fb2[fb_wr_addr[15:2]] <= write_data_reg[23:16];
+                    fb3[fb_wr_addr[15:2]] <= write_data_reg[31:24];
+                    if (fb_wr_addr < FB_SIZE - 4)
+                        fb_wr_addr <= fb_wr_addr + 16'd4;
                     else
                         fb_wr_addr <= 16'd0;
                 end

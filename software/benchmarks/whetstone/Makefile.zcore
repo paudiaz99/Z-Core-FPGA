@@ -1,0 +1,48 @@
+
+PREFIX  = riscv32-unknown-elf-
+CC      = $(PREFIX)gcc
+OBJCOPY = $(PREFIX)objcopy
+OBJDUMP = $(PREFIX)objdump
+SIZE    = $(PREFIX)size
+
+LIBS_DIR = ../../libs
+
+ARCH    = -march=rv32im_zicsr -mabi=ilp32
+CFLAGS  = $(ARCH) -O2 -Wall -Wextra -ffreestanding -nostdlib -fno-common \
+          -I$(LIBS_DIR)
+LDFLAGS = -T linker_sdram.ld
+
+WHET_LOOPS ?= 1000
+CFLAGS += -DWHET_LOOPS=$(WHET_LOOPS)
+
+SRCS = whetstone_zcore.c \
+       $(LIBS_DIR)/uart.c \
+       $(LIBS_DIR)/printf.c \
+       $(LIBS_DIR)/timer.c \
+       $(LIBS_DIR)/softint64.c \
+       $(LIBS_DIR)/crt0.S
+
+.PHONY: all clean
+
+all: whetstone_zcore.bin whetstone_zcore.s
+
+whetstone_zcore.s: whetstone_zcore.c
+	$(CC) $(CFLAGS) -S -fverbose-asm -o $@ $<
+
+whetstone_zcore.elf: $(SRCS) linker_sdram.ld
+	@echo "Building Whetstone integer variant (LOOPS=$(WHET_LOOPS))..."
+	$(CC) $(CFLAGS) $(LDFLAGS) $(SRCS) -o $@
+
+whetstone_zcore.bin: whetstone_zcore.elf
+	$(OBJCOPY) -O binary $< $@
+	@echo ""
+	$(SIZE) whetstone_zcore.elf
+	@echo ""
+	@echo "Upload:  python3 ../../../scripts/upload.py /dev/ttyUSB0 \\"
+	@echo "             whetstone_zcore.bin --base 0x10000000 --entry 0x10000000 --reset"
+
+whetstone_zcore.lst: whetstone_zcore.elf
+	$(OBJDUMP) -d -S $< > $@
+
+clean:
+	rm -f whetstone_zcore.elf whetstone_zcore.bin whetstone_zcore.s whetstone_zcore.lst

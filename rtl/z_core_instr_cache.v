@@ -19,6 +19,7 @@ module z_core_instr_cache #(
 ) (
     input  wire                    clk,
     input  wire                    rstn,
+    input  wire                    invalidate,
 
     // Read port (lookup result appears 1 cycle later in *_d / data_out)
     input  wire [ADDR_WIDTH-1:0]   addr_rd,
@@ -71,7 +72,7 @@ module z_core_instr_cache #(
     reg [LINE_WIDTH-1:0]  bypass_line_q;
 
     always @(posedge clk) begin
-        if (!rstn) begin
+        if (!rstn || invalidate === 1'b1) begin
             valid_arr      <= {CACHE_DEPTH{1'b0}};
             bypass_valid_q <= 1'b0;
             valid_at_rd_q  <= 1'b0;

@@ -1,0 +1,44 @@
+
+PREFIX  = riscv32-unknown-elf-
+CC      = $(PREFIX)gcc
+OBJCOPY = $(PREFIX)objcopy
+OBJDUMP = $(PREFIX)objdump
+SIZE    = $(PREFIX)size
+
+LIBS_DIR = ../../libs
+
+ARCH    = -march=rv32im_zicsr -mabi=ilp32
+CFLAGS  = $(ARCH) -O2 -Wall -Wextra -ffreestanding -nostdlib -fno-common \
+          -I$(LIBS_DIR)
+LDFLAGS = -T linker_sdram.ld
+
+SRCS = src/ptr_chase_zcore.c \
+       $(LIBS_DIR)/uart.c \
+       $(LIBS_DIR)/printf.c \
+       $(LIBS_DIR)/timer.c \
+       $(LIBS_DIR)/softint64.c \
+       $(LIBS_DIR)/crt0.S
+
+.PHONY: all clean
+all: ptr_chase_zcore.bin ptr_chase_zcore.s
+
+ptr_chase_zcore.s: src/ptr_chase_zcore.c
+	$(CC) $(CFLAGS) -S -fverbose-asm -o $@ $<
+
+ptr_chase_zcore.elf: $(SRCS) linker_sdram.ld
+	@echo "Building pointer-chase latency benchmark..."
+	$(CC) $(CFLAGS) $(LDFLAGS) $(SRCS) -o $@
+
+ptr_chase_zcore.bin: ptr_chase_zcore.elf
+	$(OBJCOPY) -O binary $< $@
+	@echo ""
+	$(SIZE) ptr_chase_zcore.elf
+	@echo ""
+	@echo "Upload:  python3 ../../../scripts/upload.py /dev/ttyUSB0 \\"
+	@echo "             ptr_chase_zcore.bin --base 0x10000000 --entry 0x10000000 --reset"
+
+ptr_chase_zcore.lst: ptr_chase_zcore.elf
+	$(OBJDUMP) -d -S $< > $@
+
+clean:
+	rm -f ptr_chase_zcore.elf ptr_chase_zcore.bin ptr_chase_zcore.lst

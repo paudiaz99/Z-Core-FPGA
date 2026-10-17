@@ -27,25 +27,19 @@ SOFTWARE.
 
 #include <stdint.h>
 
-/* Z-Core core clock (DE10-Lite, MAX10) */
 #ifndef CPU_HZ
 #define CPU_HZ 50000000UL
 #endif
 
-/* 32-bit cycle counter (cycle CSR, 0xC00). Wraps every ~86 s at 50 MHz. */
 uint32_t cycles32(void);
 
-/* 64-bit cycle counter (cycleh:cycle, 0xC80:0xC00) read atomically.
-   Z-Core implements a true 64-bit mcycle, so this never wraps in practice. */
 uint64_t cycles64(void);
 
-/* Convert a cycle count to wall time. */
 static inline uint64_t cycles_to_us(uint64_t cyc) { return cyc / (CPU_HZ / 1000000UL); }
 static inline uint64_t cycles_to_ms(uint64_t cyc) { return cyc / (CPU_HZ / 1000UL); }
 
-/* Busy-wait delays. */
 void delay_cycles(uint64_t n);
 void delay_us(uint32_t us);
 void delay_ms(uint32_t ms);
 
-#endif /* TIMER_H */
+#endif

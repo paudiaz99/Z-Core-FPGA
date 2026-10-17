@@ -25,10 +25,9 @@ SOFTWARE.
 #include "uart.h"
 
 void uart_putc(char c) {
-  UART_TX = (unsigned int)c;
-  // Wait for transmission to complete (tx_empty = bit 0)
   while (!(UART_STAT & 0x01))
-    ; // Wait until tx_empty is 1
+    ;
+  UART_TX = (unsigned int)c;
 }
 
 void uart_puts(const char *s) {

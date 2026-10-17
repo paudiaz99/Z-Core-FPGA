@@ -21,7 +21,7 @@ $(TARGET).bin: $(TARGET).elf
 	$(OBJDUMP) -d $< > $(TARGET).lst
 	@echo "Binary size: $$(wc -c < $@) bytes"
 	@echo "Upload with:"
-	@echo "  python3 ../upload.py /dev/ttyUSB0 $@ --base 0x10000000"
+	@echo "  python3 ../../scripts/upload.py /dev/ttyUSB0 $@ --base 0x10000000"
 
 clean:
 	rm -f $(TARGET).elf $(TARGET).bin $(TARGET).lst

@@ -14,7 +14,7 @@
 **Z-Core FPGA Implementation for DE10-Lite Board**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-![RISC-V](https://img.shields.io/badge/RISC--V-RV32IMZicsr-green?logo=riscv)
+![RISC-V](https://img.shields.io/badge/RISC--V-RV32IMA-green?logo=riscv)
 [![FPGA](https://img.shields.io/badge/FPGA-MAX%2010-0071c5.svg)](https://www.altera.com/asap/offering/a1jui0000049upbmam/max-10-device-family-de10-lite-board)
 [![Board](https://img.shields.io/badge/Board-DE10--Lite-00a98f.svg)](https://www.terasic.com.tw/cgi-bin/page/archive.pl?Language=English&No=1021)
 
@@ -34,11 +34,11 @@
 
 > **Note**: The Block diagram does not include the VGA controller.
 
-## Z-Core RV32IMZicsr Architecture
+## Z-Core Architecture
 <div align="center">
   <img src="https://github.com/user-attachments/assets/5d1e0237-2ab6-4d9c-bd10-bd1ab6458d75" alt="centered image">
   <br>
-  <sup>Z-Core RV32IMZicsr Architecture Diagram.</sup>
+  <sup>Z-Core processor architecture.</sup>
 </div>
 
 
@@ -48,9 +48,11 @@
 
 ## Overview
 
-This repository contains the FPGA implementation of the Z-Core RISC-V RV32IMZicsr processor, targeting the Intel DE10-Lite development board (MAX 10 FPGA). The Core features a 32KB direct-mapped instruction cache, a 32KB 2-way set-associative data cache with write-back/write-allocate policy, a branch predictor, and a 64MB SDRAM interface, enabling large applications such as DOOM to run at playable framerates.
+This repository contains the FPGA implementation of the Z-Core RISC-V processor, targeting the Intel DE10-Lite development board (MAX 10 FPGA). The current core implements RV32IMA, Zicsr and Zifencei, with a 16 KB direct-mapped instruction cache, a 32 KB 2-way set-associative write-back/write-allocate data cache, a hybrid branch predictor and a 64 MB SDRAM interface.
 
-The system supports two execution modes: small programs run directly from on-chip Block RAM (16 KB), while large applications like DOOM are loaded into the 64MB SDRAM via a UART bootloader and execute from there with cache assistance.
+The system supports bare-metal programs and no-MMU Linux. Small programs run from on-chip Block RAM (16 KB); larger programs and Linux are loaded into SDRAM through the UART bootloader. Linux runs the kernel in Machine mode and userspace in User mode, with VGA DOOM, benchmarks and terminal tools.
+
+The Quartus project, SDRAM IP, software and matched Linux boot files are included here. No sibling checkout, external drive or submodule is required. See the [main Z-Core repository](https://github.com/paudiaz99/Z-Core) for processor development.
 
 ---
 
@@ -68,26 +70,28 @@ The system supports two execution modes: small programs run directly from on-chi
 |-----------|-------|
 | Target FPGA | Intel MAX 10 (10M50DAF484C7G) |
 | Operating Frequency | 50 MHz |
-| ISA | RV32IM + Zicsr |
-| Instruction Cache | 32 KB direct-mapped (8192 entries) |
+| ISA | RV32IMA + Zicsr + Zifencei |
+| Privilege | Machine/User modes; no MMU |
+| Instruction Cache | 16 KB direct-mapped (4096 entries) |
 | Data Cache | 32 KB 2-way set-associative (write-back, write-allocate) |
 | Branch Predictor | Gshare / tournament predictor |
 | BRAM | 16 KB on-chip (bootloader + small apps) |
 | SDRAM | 64 MB IS42S16320D @ 100 MHz (via AXI-CDC bridge) |
 | Peripherals | UART, GPIO (16-bit), VGA (320×200 RGB332), 64-bit Timer |
+| Performance Counters | Twelve fixed 64-bit counters, including D-cache misses and User-mode filtering |
 | Development Board | Terasic DE10-Lite |
 
 ---
 
 ## Performance
 
-All measurements on DE10-Lite (MAX 10) at 50 MHz.
+All measurements on DE10-Lite (MAX 10) at 50 MHz running bare-metal.
 
 ### CoreMark
 
 | Metric | Value |
 |--------|-------|
-| CoreMark/MHz | **3.06** |
+| CoreMark/MHz | **3.24** |
 
 ### DOOM (320×200, `doom1.wad` shareware)
 
@@ -113,54 +117,90 @@ All measurements on DE10-Lite (MAX 10) at 50 MHz.
 |------|---------|
 | Intel Quartus Prime Lite | FPGA synthesis and programming |
 | RISC-V GNU Toolchain | Cross-compilation (`riscv32-unknown-elf-`, rv32im_zicsr target) |
-| Python 3.x | ELF-to-HEX conversion and UART upload script |
+| Python 3.x | ELF-to-HEX conversion and UART upload scripts |
+| psmisc (`fuser`) | Check UART ownership before reset/upload |
+| Icarus Verilog / Verilator | Optional RTL checks / Linux boot simulation |
+
+Rebuilding Linux also needs the host packages listed in [doc/LINUX.md](doc/LINUX.md); Buildroot builds the no-MMU cross-toolchain.
 
 ---
 
 ## Quick Start (UART Bootloader)
 
-The Z-Core SoC includes a UART bootloader stored in Block RAM, allowing you to upload and run applications without recompiling the FPGA hardware.
+The Z-Core SoC includes a UART bootloader stored in Block RAM, allowing you to upload and run software without recompiling the FPGA hardware.
+
+### Linux
+
+Connect the powered DE10-Lite, USB-Blaster and a 3.3 V UART adapter with common ground. Close other UART terminals before resetting/uploading. Put Quartus `bin` on PATH, or pass `--quartus-pgm /path/to/quartus_pgm` to the reload script.
+
+```sh
+make boot
+make console
+```
+
+Build first (`make fpga` and `make linux`), then `make boot` programs `output_files/Z-Core.sof`, resets through UART BREAK, uploads `software/linux/build/images/` (kernel/shim/DTB) at 115200 baud and waits for login. A typical Image takes on the order of ten minutes to upload. Log in as `root` with no password. Ctrl-] exits the console and leaves Linux running.
+
+To reload Linux when the matching bitstream is already installed:
+
+```sh
+./scripts/reboot.py
+./scripts/reboot.py --dry-run
+```
+
+Reloads save exact image copies and logs under `logs/reboot/` and print a `tail -f` command. The twelve-counter kernel and bitstream must be loaded together.
 
 ### Small programs (BRAM, ≤ 12 KB)
 
-```bash
-cd software/
-make APP=1 hello.bin
-python3 upload.py /dev/ttyUSB0 hello.bin
+```sh
+make -C software/tests APP=1 hello.bin
+python3 scripts/upload.py /dev/ttyUSB0 software/tests/hello.bin --reset
 ```
 
-### DOOM (SDRAM, ~4.5 MB payload)
+### DOOM on Linux (VGA, `doom1.wad` shareware)
 
-```bash
-# Build DOOM binary
-cd software/Z-Core-DOOM/src/riscv/
-make all
+The bundled Linux image includes DOOM. Run from the Linux shell:
 
-# Upload DOOM code + WAD (two segments to SDRAM)
-cd software/
-python3 upload.py /dev/ttyUSB0 \
-    --segments Z-Core-DOOM/src/riscv/doom-zcore.bin@0x10000000 \
-               Z-Core-DOOM/doom1.wad@0x12010000 \
-    --entry 0x10000000
+```sh
+doom > /tmp/doom.log 2>&1
 ```
 
-> For the complete guide — WAD file sourcing, baud-rate speedup (`--fast`), controls, and playing DOOM — see **[doc/SOFTWARE.md § 10](doc/SOFTWARE.md#10-playing-doom)**.
+VGA displays the picture; UART supplies controls. Esc opens the menu, WASD moves/turns, Space fires, E uses, Enter selects, 1–7 selects weapons, Tab opens the map and Ctrl-C quits. `doom -warp 1 1` enters gameplay directly. Sound and network play are disabled. The earlier [bare-metal DOOM port](https://github.com/paudiaz99/Z-CORE-DOOM) remains a separate project.
+
+### Linux tools and benchmarks
+
+The image also includes lscpu, top, htop, nano, Vim tiny, perf counting, CoreMark, original Dhrystone/Whetstone/STREAM, pointer chase, WB3D and three lmbench kernels.
+
+```sh
+lscpu
+perf list
+perf stat -e cycles,instructions,dcache-misses -u coremark
+nano /tmp/example.txt
+htop
+```
+
+Files in the initramfs are lost on reset or power-off. Storing the FPGA configuration in flash does not store the Linux Image or provide persistent folders.
 
 ### Quick Reference
 
 | What | Command |
 |------|---------|
-| Build (BRAM) | `make APP=1 myprogram.bin` |
-| Upload + Monitor | `python3 upload.py /dev/ttyUSB0 myprogram.bin` |
-| Upload only | `python3 upload.py /dev/ttyUSB0 myprogram.bin -n` |
-| Clean build | `make clean` |
-| Build DOOM | `cd Z-Core-DOOM/src/riscv && make all` |
+| Build FPGA | `make fpga` |
+| Rebuild Linux | `make linux` |
+| Program FPGA + upload Linux | `make boot` |
+| Linux console | `make console` |
+| Build BRAM example | `make -C software/tests APP=1 hello.bin` |
+| Upload bare-metal program | `python3 scripts/upload.py /dev/ttyUSB0 software/tests/hello.bin --reset` |
+| Build bare-metal benchmarks | `make benchmarks` |
+| Check images and project | `make test` |
+| RTL regressions / Linux simulation | `make test-rtl` / `make sim-linux` |
+
+See [doc/LINUX.md](doc/LINUX.md) for Linux builds, programs and controls, and [doc/SOFTWARE.md](doc/SOFTWARE.md) for bare-metal software.
 
 ---
 
 ## Software Examples
 
-The `software/` directory contains examples compiled with the RISC-V GNU Toolchain.
+The `software/tests/` directory contains examples compiled with the RISC-V GNU Toolchain. Shared drivers live in `software/libs/`; larger benchmark programs are in `software/benchmarks/`.
 
 | Program | Description |
 |---------|-------------|
@@ -172,7 +212,7 @@ The `software/` directory contains examples compiled with the RISC-V GNU Toolcha
 | `pong` | Classic Pong via UART |
 | `multiplication` | RV32IM multiply/divide instruction test |
 | `sdram_test` | SDRAM read/write/byte-strobe test |
-| `Z-Core-DOOM/` | DOOM port for Z-Core (runs from SDRAM) |
+| `linux/` | Linux board port, applications, benchmarks and VGA DOOM |
 
 ### Pong Game
 
@@ -216,7 +256,7 @@ The `software/` directory contains examples compiled with the RISC-V GNU Toolcha
             | (stack top)      |
 ```
 
-### SDRAM Layout (for DOOM and large programs)
+### Historical Bare-Metal DOOM SDRAM Layout
 
 ```
 0x1000_0000 +------------------+
@@ -236,94 +276,38 @@ The `software/` directory contains examples compiled with the RISC-V GNU Toolcha
 
 ## Project Structure
 
+```text
+├── rtl/
+│   ├── z_core_top_model.v
+│   ├── z_core_control_u.v
+│   ├── z_core_csr_file.v
+│   ├── z_core_instr_cache.v
+│   ├── z_core_data_cache.v
+│   ├── z_core_write_buffer.v
+│   ├── axil_*.v
+│   ├── axi_sdram_bridge.v
+│   ├── sdram_axi_top.v
+│   ├── sdram_pll0.v / .qip
+│   └── Sdram_Control/
+├── software/
+│   ├── bootloader/
+│   ├── libs/
+│   ├── tests/
+│   ├── benchmarks/
+│   ├── sdram_test/
+│   └── linux/
+├── scripts/
+├── doc/
+├── Z-Core.qpf
+├── Z-Core.qsf
+├── Z-Core.sdc
+├── Makefile
+└── LICENSE
 ```
-├── rtl/                            # Synthesizable RTL
-│   ├── z_core_top_model.v         # Top-level FPGA wrapper
-│   ├── z_core_control_u.v         # CPU Control Unit (pipeline)
-│   ├── z_core_alu.v               # Arithmetic Logic Unit
-│   ├── z_core_alu_ctrl.v          # ALU Control Unit
-│   ├── z_core_decoder.v           # Instruction Decoder
-│   ├── z_core_reg_file.v          # General Purpose Registers
-│   ├── z_core_csr_file.v          # CSR File (Zicsr extension)
-│   ├── z_core_instr_cache.v       # 32 KB Direct-Mapped I-Cache
-│   ├── z_core_data_cache.v        # 32 KB 2-Way Set-Assoc D-Cache
-│   ├── z_core_branch_pred.v       # Branch Predictor
-│   ├── z_core_pma.v               # Physical Memory Attributes checker
-│   ├── z_core_pma_map.vh          # PMA region table (platform-specific)
-│   ├── z_core_mult_unit.v         # Multiplier Unit
-│   ├── z_core_div_unit.v          # Division Unit
-│   ├── z_core_32b_timer.v         # 64-bit Timer core
-│   ├── axil_interconnect.v        # AXI-Lite Bus Interconnect
-│   ├── axil_timer.v               # Timer Peripheral
-│   ├── axil_vga.v                 # VGA Controller Peripheral
-│   ├── axil_uart.v                # UART Peripheral
-│   ├── axil_gpio.v                # GPIO Peripheral
-│   ├── axil_master.v              # AXI-Lite Master Interface
-│   ├── axil_cdc_bridge.v          # AXI Clock-Domain Crossing Bridge
-│   ├── axi_mem.v                  # AXI-Lite RAM Interface
-│   ├── axi_sdram_bridge.v         # AXI-to-SDRAM Bridge
-│   ├── sdram_axi_top.v            # SDRAM AXI Top (PLL + controller)
-│   ├── sdram_pll0.v               # 100 MHz PLL for SDRAM
-│   ├── sdram_pll0.qip             # Quartus PLL IP
-│   ├── Sdram_Control/             # SDRAM Controller (IS42S16320D)
-│   │   ├── Sdram_Control.v
-│   │   ├── control_interface.v
-│   │   ├── command.v
-│   │   ├── sdr_data_path.v
-│   │   ├── Sdram_WR_FIFO.v / .qip
-│   │   ├── Sdram_RD_FIFO.v / .qip
-│   │   └── Sdram_Params.h
-│   ├── arbiter.v                  # AXI arbiter
-│   ├── priority_encoder.v         # Priority encoder
-│   └── flist.vc                   # RTL file list
-│
-├── software/                       # Programs and tools
-│   ├── bootloader/                # On-chip UART bootloader
-│   │   ├── bootloader.c           # Bootloader source (v3.1)
-│   │   ├── boot_start.S           # Reset vector + trap handler
-│   │   ├── Makefile
-│   │   └── linker_boot.ld
-│   ├── Z-Core-DOOM/               # DOOM port for Z-Core (submodule)
-│   │   ├── src/riscv/             # Z-Core-specific DOOM backend
-│   │   │   ├── zcore.lds          # Linker script (SDRAM target)
-│   │   │   ├── config.h           # Platform addresses
-│   │   │   ├── start.S            # DOOM startup
-│   │   │   └── ...                # Platform driver files
-│   │   └── doom1.wad              # (not included — see SOFTWARE.md)
-│   ├── sdram_test/                # Standalone SDRAM test (SDRAM execution)
-│   ├── libs/                      # Shared libraries
-│   │   ├── uart.c / uart.h        # UART driver
-│   │   ├── vga.h                  # VGA header-only library
-│   │   ├── timer.c / timer.h      # Cycle-counter timer helpers
-│   │   ├── printf.c / printf.h    # Minimal printf
-│   │   └── softint64.c            # 64-bit integer helpers
-│   ├── hello.c                    # UART Hello World
-│   ├── led_test.c                 # LED blink
-│   ├── gpio_test.c                # GPIO test
-│   ├── vga_test.c                 # VGA color bars
-│   ├── pong.c                     # UART Pong game
-│   ├── space.c                    # VGA space shooter
-│   ├── multiplication.c           # RV32IM multiply/divide test
-│   ├── sdram_test.c               # SDRAM read/write test (BRAM execution)
-│   ├── start.S                    # RISC-V startup code (BRAM programs)
-│   ├── linker.ld                  # Linker script (BRAM, origin 0x0000)
-│   ├── linker_app.ld              # Linker script (BRAM app, origin 0x1000)
-│   ├── Makefile                   # GNU Make build system
-│   ├── upload.py                  # UART bootloader client
-│   └── elf2hex.py                 # ELF-to-HEX/MIF utility
-│
-├── doc/                            # Documentation
-│   ├── SOFTWARE.md                # Complete build & run guide
-│   ├── FPGA_DEPLOYMENT.md         # FPGA synthesis guide
-│   ├── GPIO.md                    # LED/switch interfacing
-│   ├── UART.md                    # Serial communication
-│   ├── VGA.md                     # VGA controller and API
-│   └── TIMER.md                   # 64-bit Timer and API
-│
-├── Z-Core.qsf                      # Quartus Pin Assignments & source files
-├── Z-Core.sdc                      # Timing Constraints
-└── LICENSE                         # MIT License
-```
+
+`rtl/` contains the processor, peripherals and local SDRAM IP. Linux images land in `software/linux/build/images/` after `make linux`; the bitstream in `output_files/` after `make fpga`. Build outputs, source downloads, Quartus databases, logs and any local `prebuilt/` cache are gitignored.
+
+The Linux Image loads at `0x10000000`, its entry shim at `0x13fe0000`, and its DTB at `0x13ff0000`. The final 128 KiB of SDRAM is reserved for the shim and DTB.
 
 ---
 
@@ -353,26 +337,29 @@ The `software/` directory contains examples compiled with the RISC-V GNU Toolcha
 
 | Document | Description |
 |----------|-------------|
-| [SOFTWARE.md](doc/SOFTWARE.md) | Complete build, upload, and DOOM run guide |
-| [FPGA_DEPLOYMENT.md](doc/FPGA_DEPLOYMENT.md) | FPGA synthesis and deployment |
-| [GPIO.md](doc/GPIO.md) | LED and switch interfacing |
-| [UART.md](doc/UART.md) | Serial communication |
-| [VGA.md](doc/VGA.md) | VGA controller and API |
-| [TIMER.md](doc/TIMER.md) | 64-bit Timer and API |
+| [SOFTWARE.md](doc/SOFTWARE.md) | Bare-metal builds, examples and upload guide |
+| [HARDWARE.md](doc/HARDWARE.md) | Quartus project, wiring, peripherals and memory map |
+| [CPU.md](doc/CPU.md) | Pipeline, privilege, caches and performance counters |
+| [LINUX.md](doc/LINUX.md) | Linux build, boot, applications and limitations |
+
+**Timing at 50 MHz is not closed.** The bundled counter release passed Quartus, directed RTL tests and Linux simulation; it has not been uploaded to the board.
 
 ---
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+**Original** project RTL and board software are under the MIT License — see [LICENSE](LICENSE). That MIT grant does **not** cover the whole tree.
+
+Third-party and vendor components (CoreMark, STREAM, lmbench, DOOM engine, Forencich AXI, Painter Whetstone originals, Dhrystone provenance, Altera Quartus IP, Terasic-style SDRAM control, etc.) keep their own terms. Full inventory, restrictions (including lmbench result publication rules), and non-MIT FPGA IP notes: **[THIRD_PARTY.md](THIRD_PARTY.md)**. Linux packaging GPLv2 text: `software/linux/LICENSE`.
 
 ---
 
 ## Acknowledgements
 
 - **[Alex Forencich](https://github.com/alexforencich)** — AXI-Lite interconnect and memory arbiter components from the [verilog-axi](https://github.com/alexforencich/verilog-axi) library.
-- **SDRAM Controller** — IS42S16320D controller core used in the SDRAM subsystem.
-- **DOOM RISC-V port** — originally by smunaut, adapted for Z-Core. ([Z-Core-DOOM](https://github.com/paudiaz99/Z-CORE-DOOM))
+- **SDRAM Controller** — Terasic-style IS42S16320D controller under `rtl/Sdram_Control/` (not MIT; see [THIRD_PARTY.md](THIRD_PARTY.md)); Altera-generated PLL/FIFO IP likewise.
+- **DOOM RISC-V port** — originally by smunaut, adapted for Z-Core (`software/linux/userspace/doom/`, GPLv2). IWAD not shipped.
+- **[lavat](https://github.com/AngelJumbo/lavat)** — by AngelJumbo; not vendored here (source builds omit it).
 
 ---
 

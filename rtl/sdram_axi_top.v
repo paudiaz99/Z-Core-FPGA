@@ -12,8 +12,10 @@
 // Memory: 64 MB SDRAM (IS42S16320D on DE10-Lite)
 // Interface: AXI4-Lite 32-bit
 //
-// Author : Z-Core SoC
-// Date   : 2026-04-05
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2025–2026 Pau Díaz Cuesta
+// Note: Instantiates Terasic-style Sdram_Control and Altera-generated PLL/FIFO
+// IP that are NOT covered by this MIT header — see THIRD_PARTY.md.
 //=============================================================================
 
 module sdram_axi_top #(

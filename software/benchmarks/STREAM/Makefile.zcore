@@ -1,0 +1,52 @@
+
+PREFIX  = riscv32-unknown-elf-
+CC      = $(PREFIX)gcc
+OBJCOPY = $(PREFIX)objcopy
+OBJDUMP = $(PREFIX)objdump
+SIZE    = $(PREFIX)size
+
+LIBS_DIR = ../../libs
+
+ARCH    = -march=rv32im_zicsr -mabi=ilp32
+CFLAGS  = $(ARCH) -O2 -Wall -Wextra -ffreestanding -nostdlib -fno-common \
+          -fwrapv -I$(LIBS_DIR)
+LDFLAGS = -T linker_sdram.ld
+
+STREAM_ARRAY_SIZE ?= 500000
+NTIMES            ?= 20
+CFLAGS += -DSTREAM_ARRAY_SIZE=$(STREAM_ARRAY_SIZE) -DNTIMES=$(NTIMES)
+
+SRCS = stream_zcore.c \
+       $(LIBS_DIR)/uart.c \
+       $(LIBS_DIR)/printf.c \
+       $(LIBS_DIR)/timer.c \
+       $(LIBS_DIR)/softint64.c \
+       $(LIBS_DIR)/crt0.S
+
+.PHONY: all cache clean
+all: stream_zcore.bin stream_zcore.s
+
+cache:
+	$(MAKE) -f Makefile.zcore clean
+	$(MAKE) -f Makefile.zcore STREAM_ARRAY_SIZE=1024 NTIMES=1000
+
+stream_zcore.s: stream_zcore.c
+	$(CC) $(CFLAGS) -S -fverbose-asm -o $@ $<
+
+stream_zcore.elf: $(SRCS) linker_sdram.ld
+	@echo "Building STREAM variant (ARRAY_SIZE=$(STREAM_ARRAY_SIZE), NTIMES=$(NTIMES))..."
+	$(CC) $(CFLAGS) $(LDFLAGS) $(SRCS) -o $@
+
+stream_zcore.bin: stream_zcore.elf
+	$(OBJCOPY) -O binary $< $@
+	@echo ""
+	$(SIZE) stream_zcore.elf
+	@echo ""
+	@echo "Upload:  python3 ../../../scripts/upload.py /dev/ttyUSB0 \\"
+	@echo "             stream_zcore.bin --base 0x10000000 --entry 0x10000000 --reset"
+
+stream_zcore.lst: stream_zcore.elf
+	$(OBJDUMP) -d -S $< > $@
+
+clean:
+	rm -f stream_zcore.elf stream_zcore.bin stream_zcore.s stream_zcore.lst

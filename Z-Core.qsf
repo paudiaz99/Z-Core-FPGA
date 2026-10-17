@@ -1,12 +1,10 @@
-# -------------------------------------------------------------------------- #
-#
 # Copyright (C) 2020  Intel Corporation. All rights reserved.
-# Your use of Intel Corporation's design tools, logic functions 
-# and other software and tools, and any partner logic 
-# functions, and any output files from any of the foregoing 
-# (including device programming or simulation files), and any 
-# associated documentation or information are expressly subject 
-# to the terms and conditions of the Intel Program License 
+# Your use of Intel Corporation's design tools, logic functions
+# and other software and tools, and any partner logic
+# functions, and any output files from any of the foregoing
+# (including device programming or simulation files), and any
+# associated documentation or information are expressly subject
+# to the terms and conditions of the Intel Program License
 # Subscription Agreement, the Intel Quartus Prime License Agreement,
 # the Intel FPGA IP License Agreement, or other applicable license
 # agreement, including, without limitation, that your use is for
@@ -15,26 +13,6 @@
 # refer to the applicable agreement for further details, at
 # https://fpgasoftware.intel.com/eula.
 #
-# -------------------------------------------------------------------------- #
-#
-# Quartus Prime
-# Version 20.1.1 Build 720 11/11/2020 SJ Lite Edition
-# Date created = 21:50:28  November 29, 2025
-#
-# -------------------------------------------------------------------------- #
-#
-# Notes:
-#
-# 1) The default values for assignments are stored in the file:
-#		Z-Core_assignment_defaults.qdf
-#    If this file doesn't exist, see file:
-#		assignment_defaults.qdf
-#
-# 2) Altera recommends that you do not modify this file. This
-#    file is updated automatically by the Quartus Prime software
-#    and any changes you make may be lost or overwritten.
-#
-# -------------------------------------------------------------------------- #
 
 
 set_global_assignment -name FAMILY "MAX 10"
@@ -118,7 +96,10 @@ set_location_assignment PIN_V22 -to DRAM_LDQM
 set_location_assignment PIN_U22 -to DRAM_RAS_N
 set_location_assignment PIN_J21 -to DRAM_UDQM
 set_location_assignment PIN_W6 -to uart_rx
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to uart_rx
 set_location_assignment PIN_V5 -to uart_tx
+set_location_assignment PIN_Y11 -to host_rstn
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to host_rstn
 
 
 
@@ -168,26 +149,17 @@ set_location_assignment PIN_V5 -to uart_tx
 
 
 
-# ==============================================================================
-# Timing Optimization Settings
-# ==============================================================================
-# Force Standard Fit (do NOT skip optimizations like Auto Fit does)
 set_global_assignment -name FITTER_EFFORT "STANDARD FIT"
-# Optimize for maximum clock speed
 set_global_assignment -name OPTIMIZATION_MODE "HIGH PERFORMANCE EFFORT"
-# Physical Synthesis: allow the Fitter to restructure and retime logic
 set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC ON
 set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_RETIMING ON
 set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_DUPLICATION ON
 set_global_assignment -name PHYSICAL_SYNTHESIS_EFFORT EXTRA
-# Aggressive optimizations
 set_global_assignment -name OPTIMIZE_HOLD_TIMING "ALL PATHS"
 set_global_assignment -name OPTIMIZE_MULTI_CORNER_TIMING ON
 set_global_assignment -name FITTER_AGGRESSIVE_ROUTABILITY_OPTIMIZATION AUTOMATICALLY
-# Allow the synthesizer to optimize for speed
 set_global_assignment -name SYNTH_TIMING_DRIVEN_SYNTHESIS ON
 set_global_assignment -name ADV_NETLIST_OPT_SYNTH_WYSIWYG_REMAP ON
-# ==============================================================================
 
 set_global_assignment -name ENABLE_OCT_DONE OFF
 set_global_assignment -name EXTERNAL_FLASH_FALLBACK_ADDRESS 00000000
@@ -205,15 +177,12 @@ set_location_assignment PIN_W13 -to gpio_pins[11]
 set_location_assignment PIN_W12 -to gpio_pins[12]
 set_location_assignment PIN_AB13 -to gpio_pins[13]
 set_location_assignment PIN_AB12 -to gpio_pins[14]
-set_location_assignment PIN_Y11 -to gpio_pins[15]
 set_global_assignment -name PARTITION_NETLIST_TYPE SOURCE -section_id Top
 set_global_assignment -name PARTITION_FITTER_PRESERVATION_LEVEL PLACEMENT_AND_ROUTING -section_id Top
 set_global_assignment -name PARTITION_COLOR 16764057 -section_id Top
 
-# SDRAM sources
-set_global_assignment -name SEARCH_PATH rtl/Sdram_Control
+set_global_assignment -name SEARCH_PATH "rtl/Sdram_Control"
 
-# VGA Pin Assignments
 set_location_assignment PIN_AA1 -to VGA_R[0]
 set_location_assignment PIN_V1 -to VGA_R[1]
 set_location_assignment PIN_Y2 -to VGA_R[2]
@@ -242,41 +211,44 @@ set_instance_assignment -name IO_STANDARD "2.5 V" -to VGA_B[2]
 set_instance_assignment -name IO_STANDARD "2.5 V" -to VGA_B[3]
 set_instance_assignment -name IO_STANDARD "2.5 V" -to VGA_HS
 set_instance_assignment -name IO_STANDARD "2.5 V" -to VGA_VS
-set_global_assignment -name VERILOG_INCLUDE_FILE rtl/z_core_pma_map.vh
-set_global_assignment -name VERILOG_FILE rtl/z_core_pma.v
-set_global_assignment -name VERILOG_FILE rtl/z_core_data_cache.v
+set_global_assignment -name VERILOG_INCLUDE_FILE "rtl/z_core_pma_map.vh"
+set_global_assignment -name VERILOG_FILE "rtl/z_core_pma.v"
+set_global_assignment -name VERILOG_FILE "rtl/z_core_data_cache.v"
+set_global_assignment -name VERILOG_FILE "rtl/z_core_write_buffer.v"
 set_global_assignment -name SDC_FILE "Z-Core.sdc"
-set_global_assignment -name VERILOG_FILE rtl/z_core_top_model.v
-set_global_assignment -name VERILOG_FILE rtl/z_core_reg_file.v
-set_global_assignment -name VERILOG_FILE rtl/z_core_csr_file.v
-set_global_assignment -name VERILOG_FILE rtl/z_core_mult_unit.v
-set_global_assignment -name VERILOG_FILE rtl/z_core_mult_tree.v
-set_global_assignment -name VERILOG_FILE rtl/z_core_mult_synth.v
-set_global_assignment -name VERILOG_FILE rtl/z_core_instr_cache.v
-set_global_assignment -name VERILOG_FILE rtl/z_core_div_unit.v
-set_global_assignment -name VERILOG_FILE rtl/z_core_decoder.v
-set_global_assignment -name VERILOG_FILE rtl/z_core_control_u.v
-set_global_assignment -name VERILOG_FILE rtl/z_core_branch_pred.v
-set_global_assignment -name VERILOG_FILE rtl/z_core_alu_ctrl.v
-set_global_assignment -name VERILOG_FILE rtl/z_core_alu.v
-set_global_assignment -name VERILOG_FILE rtl/z_core_32b_timer.v
-set_global_assignment -name VERILOG_FILE rtl/priority_encoder.v
-set_global_assignment -name VERILOG_FILE rtl/axil_uart.v
-set_global_assignment -name VERILOG_FILE rtl/axil_timer.v
-set_global_assignment -name VERILOG_FILE rtl/axil_master.v
-set_global_assignment -name VERILOG_FILE rtl/axil_interconnect.v
-set_global_assignment -name VERILOG_FILE rtl/axil_gpio.v
-set_global_assignment -name VERILOG_FILE rtl/axil_vga.v
-set_global_assignment -name VERILOG_FILE rtl/axi_mem.v
-set_global_assignment -name VERILOG_FILE rtl/arbiter.v
-set_global_assignment -name VERILOG_FILE rtl/axil_cdc_bridge.v
-set_global_assignment -name VERILOG_FILE rtl/sdram_axi_top.v
-set_global_assignment -name VERILOG_FILE rtl/axi_sdram_bridge.v
-set_global_assignment -name VERILOG_FILE rtl/Sdram_Control/Sdram_Control.v
-set_global_assignment -name VERILOG_FILE rtl/Sdram_Control/control_interface.v
-set_global_assignment -name VERILOG_FILE rtl/Sdram_Control/command.v
-set_global_assignment -name VERILOG_FILE rtl/Sdram_Control/sdr_data_path.v
-set_global_assignment -name QIP_FILE rtl/Sdram_Control/Sdram_WR_FIFO.qip
-set_global_assignment -name QIP_FILE rtl/Sdram_Control/Sdram_RD_FIFO.qip
-set_global_assignment -name QIP_FILE rtl/sdram_pll0.qip
+set_global_assignment -name VERILOG_FILE "rtl/z_core_top_model.v"
+set_global_assignment -name VERILOG_FILE "rtl/z_core_reg_file.v"
+set_global_assignment -name VERILOG_FILE "rtl/z_core_csr_file.v"
+set_global_assignment -name VERILOG_FILE "rtl/z_core_mult_unit.v"
+set_global_assignment -name VERILOG_FILE "rtl/z_core_mult_tree.v"
+set_global_assignment -name VERILOG_FILE "rtl/z_core_mult_synth.v"
+set_global_assignment -name VERILOG_FILE "rtl/z_core_instr_cache.v"
+set_global_assignment -name VERILOG_FILE "rtl/z_core_div_unit.v"
+set_global_assignment -name VERILOG_FILE "rtl/z_core_decoder.v"
+set_global_assignment -name VERILOG_FILE "rtl/z_core_control_u.v"
+set_global_assignment -name VERILOG_FILE "rtl/z_core_branch_pred.v"
+set_global_assignment -name VERILOG_FILE "rtl/z_core_alu_ctrl.v"
+set_global_assignment -name VERILOG_FILE "rtl/z_core_alu.v"
+set_global_assignment -name VERILOG_FILE "rtl/z_core_32b_timer.v"
+set_global_assignment -name VERILOG_FILE "rtl/priority_encoder.v"
+set_global_assignment -name VERILOG_FILE "rtl/axil_uart.v"
+set_global_assignment -name VERILOG_FILE "rtl/uart_break_reset.v"
+set_global_assignment -name VERILOG_FILE "rtl/axil_timer.v"
+set_global_assignment -name VERILOG_FILE "rtl/axil_master.v"
+set_global_assignment -name VERILOG_FILE "rtl/axil_interconnect.v"
+set_global_assignment -name VERILOG_FILE "rtl/axil_gpio.v"
+set_global_assignment -name VERILOG_FILE "rtl/axil_vga.v"
+set_global_assignment -name VERILOG_FILE "rtl/axi_mem.v"
+set_global_assignment -name VERILOG_FILE "rtl/arbiter.v"
+set_global_assignment -name VERILOG_FILE "rtl/axil_cdc_bridge.v"
+set_global_assignment -name VERILOG_FILE "rtl/sdram_axi_top.v"
+set_global_assignment -name VERILOG_FILE "rtl/axi_sdram_bridge.v"
+set_global_assignment -name VERILOG_FILE "rtl/Sdram_Control/Sdram_Control.v"
+set_global_assignment -name VERILOG_FILE "rtl/Sdram_Control/control_interface.v"
+set_global_assignment -name VERILOG_FILE "rtl/Sdram_Control/command.v"
+set_global_assignment -name VERILOG_FILE "rtl/Sdram_Control/sdr_data_path.v"
+set_global_assignment -name QIP_FILE "rtl/Sdram_Control/Sdram_WR_FIFO.qip"
+set_global_assignment -name QIP_FILE "rtl/Sdram_Control/Sdram_RD_FIFO.qip"
+set_global_assignment -name QIP_FILE "rtl/sdram_pll0.qip"
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
+set_global_assignment -name SEARCH_PATH "."

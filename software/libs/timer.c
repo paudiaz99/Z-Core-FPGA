@@ -34,8 +34,6 @@ uint32_t cycles32(void)
 uint64_t cycles64(void)
 {
     uint32_t hi, lo, hi2;
-    /* Re-read the high word and retry if it changed mid-read (low word
-       rolled over between the two CSR reads). */
     do {
         asm volatile("csrr %0, cycleh" : "=r"(hi));
         asm volatile("csrr %0, cycle"  : "=r"(lo));

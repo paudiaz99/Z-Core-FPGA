@@ -1,0 +1,22 @@
+Benchmark originals retained for provenance (not claimed as MIT).
+
+Dhrystone 2.1
+  Author: Reinhold P. Weicker
+  Source: https://www.netlib.org/benchmark/dhry-c (see SOURCES.json)
+  Status: Widely redistributed historically via netlib / Usenet; no OSI
+  SPDX identifier is attached in the upstream distribution. Keep these
+  files and RATIONALE with any redistribution of the originals. Z-Core
+  ports live outside this directory and carry their own MIT headers for
+  the porting work only.
+
+Whetstone (Painter C conversion)
+  Copyright (c) 1998 Painter Engineering, Inc. All Rights Reserved.
+  Permission is granted to use, duplicate, and publish the text and
+  program as long as it includes the entire comment block in whetstone.c.
+  Do not strip that header.
+
+STREAM
+  See https://www.cs.virginia.edu/stream/ and the LICENSE.txt shipped with
+  the Z-Core STREAM tree under software/benchmarks/STREAM/.
+
+Checksums / fetch URLs: SOURCES.json

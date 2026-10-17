@@ -1,0 +1,48 @@
+
+PREFIX  = riscv32-unknown-elf-
+CC      = $(PREFIX)gcc
+OBJCOPY = $(PREFIX)objcopy
+OBJDUMP = $(PREFIX)objdump
+SIZE    = $(PREFIX)size
+
+LIBS_DIR = ../../libs
+
+ARCH    = -march=rv32im_zicsr -mabi=ilp32
+CFLAGS  = $(ARCH) -O3 -Wall -Wextra -ffreestanding -nostdlib -fno-common \
+          -I$(LIBS_DIR)
+LDFLAGS = -T linker_sdram.ld
+
+DHRY_ITERATIONS ?= 500000
+CFLAGS += -DDHRY_ITERATIONS=$(DHRY_ITERATIONS)
+
+SRCS = dhrystone_zcore.c \
+       $(LIBS_DIR)/uart.c \
+       $(LIBS_DIR)/printf.c \
+       $(LIBS_DIR)/timer.c \
+       $(LIBS_DIR)/softint64.c \
+       $(LIBS_DIR)/crt0.S
+
+.PHONY: all clean
+
+all: dhrystone_zcore.bin dhrystone_zcore.s
+
+dhrystone_zcore.s: dhrystone_zcore.c
+	$(CC) $(CFLAGS) -S -fverbose-asm -o $@ $<
+
+dhrystone_zcore.elf: $(SRCS) linker_sdram.ld
+	@echo "Building Dhrystone 2.1 (ITERATIONS=$(DHRY_ITERATIONS))..."
+	$(CC) $(CFLAGS) $(LDFLAGS) $(SRCS) -o $@
+
+dhrystone_zcore.bin: dhrystone_zcore.elf
+	$(OBJCOPY) -O binary $< $@
+	@echo ""
+	$(SIZE) dhrystone_zcore.elf
+	@echo ""
+	@echo "Upload:  python3 ../../../scripts/upload.py /dev/ttyUSB0 \\"
+	@echo "             dhrystone_zcore.bin --base 0x10000000 --entry 0x10000000 --reset"
+
+dhrystone_zcore.lst: dhrystone_zcore.elf
+	$(OBJDUMP) -d -S $< > $@
+
+clean:
+	rm -f dhrystone_zcore.elf dhrystone_zcore.bin dhrystone_zcore.s dhrystone_zcore.lst

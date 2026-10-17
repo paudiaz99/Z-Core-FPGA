@@ -5,19 +5,12 @@
 #define ACK            0x06
 #define NAK            0x15
 
-/* 50 MHz / (16 * 115200) ~ 27 */
 #define BAUD_DIV_115200 27
 
-/* Maximum number of segments */
 #define MAX_SEGMENTS    8
 
-/* SDRAM base for BIST */
 #define SDRAM_BASE     0x10000000
 
-/* ---- Trap reporter ----
- * Called from trap_entry (boot_start.S) with mcause/mepc/mtval. Reports the
- * fault and halts so an unhandled exception is visible instead of looking
- * like a silent reboot to the bootloader. Not static: referenced from asm. */
 void trap_report(unsigned int mcause, unsigned int mepc, unsigned int mtval) {
     uart_puts("\r\nTRAP c=");
     uart_puthex(mcause);
@@ -42,23 +35,10 @@ static unsigned int recv_le32(void) {
 }
 
 static void print_banner(void) {
-    uart_puts("\r\nZ-Core Bootloader v3.1 (SDRAM)\r\n"
+    uart_puts("\r\nZ-Core Bootloader v3.2 (SDRAM)\r\n"
               " BRAM 16K@0  SDRAM 64M@0x10000000  UART 115200 8N1\r\n");
 }
 
-/* D-cache eviction by capacity miss.
- *
- * Z-Core has no fence.i and the I-cache fetch path does not snoop the
- * D-cache, so freshly stored program text can sit dirty in the D-cache
- * while the I-fetch reads stale main memory. To make the upload visible
- * to instruction fetch, every dirty line must be evicted (and thus
- * written back) before we jump.
- *
- * FPGA build: 2-way × 2048 sets × 4 B = 16 KB D-cache. Reading 64 KB of
- * contiguous addresses from a region untouched by the upload hits each
- * set with four distinct tags, guaranteeing both ways of every set are
- * replaced and any dirty line is forced through AXI to memory.
- */
 static void dcache_flush(void) {
     volatile unsigned int * const scratch =
         (volatile unsigned int *)0x10100000;
@@ -67,33 +47,32 @@ static void dcache_flush(void) {
     }
 }
 
-/* ---- SDRAM Built-In Self Test ---- */
+static void write_buffer_drain(void) {
+    __asm__ volatile ("fence rw, rw" ::: "memory");
+}
+
 static int sdram_bist(void) {
     volatile unsigned int *sdram = (volatile unsigned int *)SDRAM_BASE;
     int errors = 0;
 
-    /* Test addresses: scattered across first 1 MB to exercise
-       different rows/banks. Each offset is in 32-bit words. */
     static const unsigned int offsets[] = {
-        0,              /* 0x10000000 */
-        17,             /* 0x10000044 */
-        0x100,          /* 0x10000400 */
-        0x1000,         /* 0x10004000 */
-        0x10000,        /* 0x10040000 */
-        0x20000,        /* 0x10080000 */
-        0x3DEAD,        /* 0x100F6BB4 */
-        0x3FFFF,        /* 0x100FFFFC */
+        0,
+        17,
+        0x100,
+        0x1000,
+        0x10000,
+        0x20000,
+        0x3DEAD,
+        0x3FFFF,
     };
     static const int n_offsets = sizeof(offsets) / sizeof(offsets[0]);
 
     uart_puts("BIST: ");
 
-    /* Phase 1: write address-as-data pattern */
     for (int i = 0; i < n_offsets; i++)
         sdram[offsets[i]] = offsets[i] ^ 0xA5A5A5A5;
 
 
-    /* Phase 3: walking ones (check data bus integrity) */
     for (int bit = 0; bit < 32; bit++) {
         unsigned int pattern = 1u << bit;
         sdram[0] = pattern;
@@ -110,12 +89,10 @@ static int sdram_bist(void) {
         }
     }
 
-    /* Phase 4: byte access (lb/sb go through RMW in AXI bridge) */
     {
         volatile unsigned int *word = &sdram[0x2000];
         volatile unsigned char *bytes = (volatile unsigned char *)word;
 
-        /* Write a known word, then modify individual bytes */
         *word = 0xDEADBEEF;
         unsigned int rb = *word;
         if (rb != 0xDEADBEEF) {
@@ -125,10 +102,8 @@ static int sdram_bist(void) {
             uart_puts("\r\n       ");
         }
 
-        /* Modify byte 0 (bits [7:0]) */
         bytes[0] = 0x42;
         rb = *word;
-        /* Read back full word — expect 0xDEADBE42 */
         if (rb != 0xDEADBE42u) {
             errors++;
             uart_puts("FAIL byte[0] exp=DEADBE42 got=");
@@ -136,7 +111,6 @@ static int sdram_bist(void) {
             uart_puts("\r\n       ");
         }
 
-        /* Modify byte 1 (bits [15:8]) */
         bytes[1] = 0x55;
         rb = *word;
         if (rb != 0xDEAD5542u) {
@@ -146,7 +120,6 @@ static int sdram_bist(void) {
             uart_puts("\r\n       ");
         }
 
-        /* Modify byte 2 (bits [23:16]) */
         bytes[2] = 0xAA;
         rb = *word;
         if (rb != 0xDEAA5542u) {
@@ -156,7 +129,6 @@ static int sdram_bist(void) {
             uart_puts("\r\n       ");
         }
 
-        /* Modify byte 3 (bits [31:24]) */
         bytes[3] = 0x77;
         rb = *word;
         if (rb != 0x77AA5542u) {
@@ -166,7 +138,6 @@ static int sdram_bist(void) {
             uart_puts("\r\n       ");
         }
 
-        /* Test single-byte read-back */
         *word = 0x04030201;
         for (int b = 0; b < 4; b++) {
             unsigned char got_b = bytes[b];
@@ -184,16 +155,14 @@ static int sdram_bist(void) {
         }
     }
 
-    /* Phase 5: halfword access (lh/sh) */
     {
         volatile unsigned int *word = &sdram[0x2001];
         volatile unsigned short *halfs = (volatile unsigned short *)word;
 
         *word = 0xCAFEBABE;
 
-        /* Read halfwords */
-        unsigned short h0 = halfs[0]; /* should be 0xBABE */
-        unsigned short h1 = halfs[1]; /* should be 0xCAFE */
+        unsigned short h0 = halfs[0];
+        unsigned short h1 = halfs[1];
         if (h0 != 0xBABEu) {
             errors++;
             uart_puts("FAIL lh[0] exp=BABE got=");
@@ -207,7 +176,6 @@ static int sdram_bist(void) {
             uart_puts("\r\n       ");
         }
 
-        /* Write halfword, read back full word */
         halfs[0] = 0x1234;
         unsigned int rb = *word;
         if (rb != 0xCAFE1234u) {
@@ -227,22 +195,18 @@ static int sdram_bist(void) {
         }
     }
 
-    /* Phase 6: NUL byte preservation
-     * DOOM WAD lump names are 8-byte strings, NUL-padded.  If SDRAM
-     * corrupts 0x00 bytes (e.g., 0x00 → 0x40), name comparisons fail.
-     * This test writes words containing 0x00 bytes and verifies them. */
     {
         volatile unsigned int *base = &sdram[0x3000];
 
         static const unsigned int patterns[] = {
-            0x00000000,   /* all zeros */
-            0xFF00FF00,   /* alternating zero bytes */
-            0x00FF00FF,   /* alternating zero bytes (swapped) */
-            0x00004142,   /* "BA\0\0" — WAD-style NUL padding */
-            0x00004E57,   /* "WN\0\0" — like "BROWN\0\0\0" high word */
-            0x31574F52,   /* "ROW1" — no NULs (control) */
-            0x00000042,   /* single byte + 3 NULs */
-            0x42000000,   /* 3 NULs + single byte */
+            0x00000000,
+            0xFF00FF00,
+            0x00FF00FF,
+            0x00004142,
+            0x00004E57,
+            0x31574F52,
+            0x00000042,
+            0x42000000,
         };
         int np = sizeof(patterns) / sizeof(patterns[0]);
 
@@ -264,12 +228,9 @@ static int sdram_bist(void) {
         }
     }
 
-    /* Phase 7: read consistency — same address read twice must match.
-     * If the CDC bridge or SDRAM controller has a pipeline hazard,
-     * two back-to-back reads can return different values. */
     {
         volatile unsigned int *addr = &sdram[0x4000];
-        *addr = 0x12003400;  /* word with embedded NULs */
+        *addr = 0x12003400;
 
         int consist_errs = 0;
         for (int r = 0; r < 16; r++) {
@@ -289,10 +250,6 @@ static int sdram_bist(void) {
         errors += consist_errs;
     }
 
-    /* Phase 8: pointer-chase walk.
-     * Intrusive linked list scattered across rows/banks, walked via
-     * next pointers. Mirrors DOOM's thinker/zone traversal: load
-     * pointer, load tag, deref pointer to next node. */
     {
         #define CHASE_N   8
         static const unsigned int node_off[CHASE_N] = {
@@ -313,7 +270,7 @@ static int sdram_bist(void) {
         for (int hop = 0; hop < CHASE_N; hop++) {
             unsigned int tag = cur[2];
             unsigned int nxt = cur[0];
-            unsigned int nx2 = cur[0];  /* double-read consistency */
+            unsigned int nx2 = cur[0];
 
             int bad = (tag != (unsigned int)hop) ||
                       (nxt != nx2) ||
@@ -352,37 +309,29 @@ void main(void) {
     uart_set_baud(BAUD_DIV_115200);
     print_banner();
 
-    /* ---- SDRAM BIST ---- */
     sdram_bist();
 
     uart_puts("Waiting for upload...\r\n");
 
-    /* ---- Sync handshake ---- */
     while ((unsigned char)uart_getc_blocking() != SYNC_REQ)
         ;
     uart_putc((char)SYNC_ACK);
 
-    /* ---- Baud rate negotiation ---- */
     unsigned int new_baud_div = recv_le32();
     if (new_baud_div != 0) {
         uart_putc((char)ACK);
-        /* Wait for TX to drain before switching */
         while (!(UART_STAT & UART_STAT_TX_EMPTY))
             ;
-        /* Small guard time for host to see ACK and switch */
         for (volatile int i = 0; i < 5000; i++)
             ;
         uart_set_baud(new_baud_div);
-        /* Delay for baud to settle */
         for (volatile int i = 0; i < 5000; i++)
             ;
-        /* Send ready byte at new baud so host can verify */
         uart_putc((char)ACK);
     } else {
         uart_putc((char)ACK);
     }
 
-    /* ---- Segment count ---- */
     unsigned int seg_count = (unsigned int)(unsigned char)uart_getc_blocking();
     if (seg_count == 0 || seg_count > MAX_SEGMENTS) {
         uart_putc((char)NAK);
@@ -395,7 +344,6 @@ void main(void) {
     uart_putint((int)seg_count);
     uart_puts("\r\n");
 
-    /* ---- Receive each segment ---- */
     for (unsigned int s = 0; s < seg_count; s++) {
         unsigned int base = recv_le32();
         unsigned int size = recv_le32();
@@ -416,9 +364,6 @@ void main(void) {
         uart_putint((int)size);
         uart_puts(" B\r\n");
 
-        /* Receive payload — buffer 4 bytes and write as 32-bit words.
-         * Byte-by-byte writes trigger slow RMW in the SDRAM bridge;
-         * word writes use the fast direct path. */
         volatile unsigned int *dest32 = (volatile unsigned int *)base;
         unsigned int checksum = 0;
         unsigned int full_words = size / 4;
@@ -434,7 +379,6 @@ void main(void) {
             dest32[w] = word;
         }
 
-        /* Handle trailing 1-3 bytes (if size not multiple of 4) */
         if (remainder > 0) {
             unsigned char *tail = (unsigned char *)&dest32[full_words];
             for (unsigned int j = 0; j < remainder; j++) {
@@ -444,7 +388,6 @@ void main(void) {
             }
         }
 
-        /* Verify checksum */
         unsigned int expected = recv_le32();
         if (checksum != expected) {
             uart_putc((char)NAK);
@@ -459,25 +402,21 @@ void main(void) {
         uart_putc((char)ACK);
     }
 
-    /* ---- Entry point and jump ---- */
     unsigned int entry = recv_le32();
     uart_putc((char)ACK);
     uart_puts("Jump ");
     uart_puthex(entry);
     uart_puts("\r\n");
 
-    /* Readback verification: test entry point + scattered addresses */
     volatile unsigned int *ep = (volatile unsigned int *)entry;
     uart_puts("Verify:");
 
-    /* Entry point (should be first instruction) */
     for (int i = 0; i < 4; i++) {
         uart_putc(' ');
         uart_puthex(ep[i]);
     }
     uart_putc('\n');
 
-    /* Test cache miss path: read from 0x10010000 (64 KB ahead) */
     volatile unsigned int *far_addr = (volatile unsigned int *)0x10010000;
     uart_puts("Far  :");
     for (int i = 0; i < 4; i++) {
@@ -486,12 +425,11 @@ void main(void) {
     }
     uart_putc('\n');
 
-    /* Wait for UART TX to finish */
     while (!(UART_STAT & UART_STAT_TX_EMPTY))
         ;
 
-    // Flush the data cache to make sure all loaded code is in main memory.
     dcache_flush();
+    write_buffer_drain();
 
     uart_puts("VfyAft:");
     for (int i = 0; i < 4; i++) {
@@ -502,7 +440,6 @@ void main(void) {
     while (!(UART_STAT & UART_STAT_TX_EMPTY))
         ;
 
-    /* Jump to loaded application */
     void (*app)(void) = (void (*)(void))entry;
     app();
 }

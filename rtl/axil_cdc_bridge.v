@@ -1,26 +1,23 @@
-/*
-
-Copyright (c) 2025 Pau Díaz Cuesta
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-*/
+//=============================================================================
+// AXI4-Lite Clock Domain Crossing Bridge
+//=============================================================================
+// Handshake-based CDC for single-outstanding AXI-Lite transactions.
+//
+// Slave side (s_*) runs on clk_s (CPU, 50 MHz).
+// Master side (m_*) runs on clk_m (SDRAM, 100 MHz).
+//
+// Protocol:
+//   1. Slave side latches request, toggles req_toggle.
+//   2. Master side detects toggle edge, drives AXI-Lite master, latches
+//      response, toggles ack_toggle.
+//   3. Slave side detects ack edge, completes response.
+//
+// Only one outstanding transaction at a time (AXI-Lite is inherently
+// single-outstanding per channel).
+//
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2025–2026 Pau Díaz Cuesta
+//=============================================================================
 
 module axil_cdc_bridge #(
     parameter ADDR_WIDTH = 26,

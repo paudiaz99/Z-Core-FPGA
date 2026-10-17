@@ -25,7 +25,7 @@ SOFTWARE.
 // **************************************************
 //              Z-Core CSR Register File
 //       RISC-V Privileged Architecture v1.12
-//              Machine Mode (M-mode) Only
+//              Machine and User Modes (M/U)
 // **************************************************
 //
 // Implements the Zicsr extension CSR read/write logic.
@@ -72,13 +72,17 @@ module z_core_csr_file #(
     // ============================================
     // Instruction Retired Pulse (from pipeline WB)
     // ============================================
+    input  wire                 instret_user_pulse,
+    input  wire                 data_access_user,
     input  wire                 instret_pulse,    // Pulse when instruction retires
 
     // ============================================
     //           Cache Hit/Miss Counters
     // ============================================
-    input  wire                 inst_cache_hit_pulse,    // Pulse when cache hit
-    input  wire                 inst_cache_miss_pulse,    // Pulse when cache miss
+    input  wire                 inst_cache_hit_pulse,    // Retired instruction consumed from the I-cache
+    input  wire                 inst_cache_miss_pulse,   // Retired instruction consumed from a refill
+    input  wire                 inst_cache_user,         // Privilege of that retired instruction
+    input  wire                 data_cache_miss_pulse,
     input  wire                 data_cache_hit_pulse,    // Pulse when cache hit
 
     // ============================================
@@ -87,6 +91,7 @@ module z_core_csr_file #(
     input  wire                 mem_read_pulse,   // Pulse when memory read
     input  wire                 mem_write_pulse,  // Pulse when memory write
     input  wire                 mem_inst_fetch_pulse,  // Pulse when memory instruction fetch
+    input  wire                 mem_uncached_pulse,    // Pulse when the access bypassed the D-cache (PMA non-cacheable)
 
     // ============================================
     //           Branch Misprediction Counters
@@ -101,13 +106,16 @@ module z_core_csr_file #(
     // ============================================
     // CSR Outputs (directly used by control unit)
     // ============================================
+    output wire                 perf_user_mode,
     output wire                 mstatus_mie,      // Global interrupt enable (mstatus.MIE)
     output wire [DATA_WIDTH-1:0] mtvec_out,       // Trap vector base address
     output wire [DATA_WIDTH-1:0] mepc_out,        // Exception PC
     output wire                 irq_pending,       // Any enabled interrupt is pending
     output wire                 mie_meie_out,      // Machine External Interrupt Enable
     output wire                 mie_mtie_out,      // Machine Timer Interrupt Enable
-    output wire                 mie_msie_out       // Machine Software Interrupt Enable
+    output wire                 mie_msie_out,      // Machine Software Interrupt Enable
+    output wire                 privilege_m,      // 1=M, 0=U
+    output wire                 csr_access_illegal
 );
 
     // =========================================================================
@@ -129,33 +137,58 @@ module z_core_csr_file #(
     localparam ADDR_MIMPID     = 12'hF13;
     localparam ADDR_MHARTID    = 12'hF14;
 
-    // Machine Counter/Timer (Read-Only from M-mode for now)
+    // Machine Counter/Timer (MRW)
     localparam ADDR_MCYCLE     = 12'hB00;
     localparam ADDR_MCYCLEH    = 12'hB80;
     localparam ADDR_MINSTRET   = 12'hB02;
     localparam ADDR_MINSTRETH  = 12'hB82;
+    localparam ADDR_MHPMCOUNTER3 = 12'hB03;
+    localparam ADDR_MHPMCOUNTER3H = 12'hB83;
+    localparam ADDR_MHPMCOUNTER4 = 12'hB04;
+    localparam ADDR_MHPMCOUNTER4H = 12'hB84;
+    localparam ADDR_MHPMCOUNTER5 = 12'hB05;
+    localparam ADDR_MHPMCOUNTER5H = 12'hB85;
+    localparam ADDR_MHPMCOUNTER6 = 12'hB06;
+    localparam ADDR_MHPMCOUNTER6H = 12'hB86;
+    localparam ADDR_MHPMCOUNTER7 = 12'hB07;
+    localparam ADDR_MHPMCOUNTER7H = 12'hB87;
+    localparam ADDR_MHPMCOUNTER8 = 12'hB08;
+    localparam ADDR_MHPMCOUNTER8H = 12'hB88;
+    localparam ADDR_MHPMCOUNTER9 = 12'hB09;
+    localparam ADDR_MHPMCOUNTER9H = 12'hB89;
+    localparam ADDR_MHPMCOUNTER10 = 12'hB0A;
+    localparam ADDR_MHPMCOUNTER10H = 12'hB8A;
+    localparam ADDR_MHPMCOUNTER11 = 12'hB0B;
+    localparam ADDR_MHPMCOUNTER12 = 12'hB0C;
+    localparam ADDR_MHPMCOUNTER11H = 12'hB8B;
+    localparam ADDR_MHPMCOUNTER12H = 12'hB8C;
 
     // User-visible counter aliases (Read-Only)
     localparam ADDR_CYCLE      = 12'hC00;
     localparam ADDR_CYCLEH     = 12'hC80;
     localparam ADDR_INSTRET    = 12'hC02;
     localparam ADDR_INSTRETH   = 12'hC82;
-    localparam ADDR_MHPMCOUNTER3 = 12'hC03;
-    localparam ADDR_MHPMCOUNTER3H = 12'hC83;
-    localparam ADDR_MHPMCOUNTER4 = 12'hC04;
-    localparam ADDR_MHPMCOUNTER4H = 12'hC84;
-    localparam ADDR_MHPMCOUNTER5 = 12'hC05;
-    localparam ADDR_MHPMCOUNTER5H = 12'hC85;
-    localparam ADDR_MHPMCOUNTER6 = 12'hC06;
-    localparam ADDR_MHPMCOUNTER6H = 12'hC86;
-    localparam ADDR_MHPMCOUNTER7 = 12'hC07;
-    localparam ADDR_MHPMCOUNTER7H = 12'hC87;
-    localparam ADDR_MHPMCOUNTER8 = 12'hC08;
-    localparam ADDR_MHPMCOUNTER8H = 12'hC88;
-    localparam ADDR_MHPMCOUNTER9 = 12'hC09;
-    localparam ADDR_MHPMCOUNTER9H = 12'hC89;
-    localparam ADDR_MHPMCOUNTER10 = 12'hC0A;
-    localparam ADDR_MHPMCOUNTER10H = 12'hC8A;
+    localparam ADDR_HPMCOUNTER3 = 12'hC03;
+    localparam ADDR_HPMCOUNTER3H = 12'hC83;
+    localparam ADDR_HPMCOUNTER4 = 12'hC04;
+    localparam ADDR_HPMCOUNTER4H = 12'hC84;
+    localparam ADDR_HPMCOUNTER5 = 12'hC05;
+    localparam ADDR_HPMCOUNTER5H = 12'hC85;
+    localparam ADDR_HPMCOUNTER6 = 12'hC06;
+    localparam ADDR_HPMCOUNTER6H = 12'hC86;
+    localparam ADDR_HPMCOUNTER7 = 12'hC07;
+    localparam ADDR_HPMCOUNTER7H = 12'hC87;
+    localparam ADDR_HPMCOUNTER8 = 12'hC08;
+    localparam ADDR_HPMCOUNTER8H = 12'hC88;
+    localparam ADDR_HPMCOUNTER9 = 12'hC09;
+    localparam ADDR_HPMCOUNTER9H = 12'hC89;
+    localparam ADDR_HPMCOUNTER10 = 12'hC0A;
+    localparam ADDR_HPMCOUNTER10H = 12'hC8A;
+    localparam ADDR_HPMCOUNTER11 = 12'hC0B;
+    localparam ADDR_HPMCOUNTER12 = 12'hC0C;
+    localparam ADDR_HPMCOUNTER11H = 12'hC8B;
+    localparam ADDR_HPMCOUNTER12H = 12'hC8C;
+
 
     // =========================================================================
     //  CSR Registers
@@ -165,16 +198,25 @@ module z_core_csr_file #(
     // RV32 mstatus layout (Privileged Spec v1.12 §3.1.6):
     //   Bit  3: MIE  (Machine Interrupt Enable)
     //   Bit  7: MPIE (Machine Previous Interrupt Enable)
-    //   Bits 12:11: MPP (Machine Previous Privilege) - hardwired 2'b11 (M-mode only)
+    //   Bits 12:11: MPP (Machine Previous Privilege) - M (11) or U (00)
     //
-    // All other bits are hardwired to 0 for M-mode-only implementation.
+    // All other implemented status fields are zero.
     reg        mstatus_mie_r;   // Bit 3
     reg        mstatus_mpie_r;  // Bit 7
+    reg        privilege_m_r;
+    reg        mstatus_mpp_r;   // Only M (11) and U (00) are supported
+    reg [31:0] mcounteren_r;
+    reg        csr_known;
+    assign privilege_m = privilege_m_r;
+    wire user_counter = csr_addr[11:8] == 4'hc;
+    assign csr_access_illegal = !csr_known ||
+        (!privilege_m_r && (csr_addr[9:8] != 2'b00 ||
+         (user_counter && !mcounteren_r[csr_addr[4:0]])));
 
     // Compose full mstatus read value
     wire [DATA_WIDTH-1:0] mstatus_val = {
         19'b0,                  // Bits 31:13 = 0
-        2'b11,                  // Bits 12:11 = MPP (hardwired M-mode)
+        {2{mstatus_mpp_r}},      // Bits 12:11 = MPP
         3'b0,                   // Bits 10:8 = 0
         mstatus_mpie_r,         // Bit 7 = MPIE
         3'b0,                   // Bits 6:4 = 0
@@ -183,11 +225,11 @@ module z_core_csr_file #(
     };
 
     // --- misa (Machine ISA) ---
-    // RV32IM + Zicsr: MXL=1 (32-bit), Extensions: I(bit 8) + M(bit 12)
+    // RV32IMA + Zicsr: MXL=1 (32-bit), Extensions: A(bit 0) + I(bit 8) + M(bit 12) + U(bit 20)
     wire [DATA_WIDTH-1:0] misa_val = {
         2'b01,                  // MXL = 1 (XLEN=32)
         4'b0,                   // Bits 29:26 = 0
-        26'b00_0000_0000_0001_0001_0000_0000  // I(bit 8) + M(bit 12)
+        26'b00_0001_0000_0001_0001_0000_0001  // A(bit 0) + I(bit 8) + M(bit 12) + U(bit 20)
     };
 
     // --- mie (Machine Interrupt Enable) ---
@@ -248,12 +290,29 @@ module z_core_csr_file #(
     reg [63:0] minstret_r;
     reg [63:0] mhpmcounter3_r; // I-Cache Hits
     reg [63:0] mhpmcounter4_r; // D-Cache Hits
-    reg [63:0] mhpmcounter5_r; // Load Requests 
+    reg [63:0] mhpmcounter5_r; // Load Requests
     reg [63:0] mhpmcounter6_r; // Store Requests
     reg [63:0] mhpmcounter7_r; // Branch Mispredictions
     reg [63:0] mhpmcounter8_r; // Pipeline Flushes
     reg [63:0] mhpmcounter9_r; // I-Cache Misses 
     reg [63:0] mhpmcounter10_r; // Memory Instruction Fetches
+    reg [63:0] mhpmcounter11_r; // Uncached Data Accesses (subset of counters 5 and 6)
+    reg [63:0] mhpmcounter12_r;
+    wire counter_user_mode = !privilege_m_r;
+    assign perf_user_mode = counter_user_mode;
+    reg [63:0] ucycle_r;
+    reg [63:0] uinstret_r;
+    reg [63:0] uhpmcounter3_r;
+    reg [63:0] uhpmcounter4_r;
+    reg [63:0] uhpmcounter5_r;
+    reg [63:0] uhpmcounter6_r;
+    reg [63:0] uhpmcounter7_r;
+    reg [63:0] uhpmcounter8_r;
+    reg [63:0] uhpmcounter9_r;
+    reg [63:0] uhpmcounter10_r;
+    reg [63:0] uhpmcounter11_r;
+    reg [63:0] uhpmcounter12_r;
+
 
     // =========================================================================
     //  Output Assignments
@@ -267,7 +326,7 @@ module z_core_csr_file #(
     assign mie_msie_out = mie_msie;
 
     // Interrupt pending: any enabled interrupt that is pending, gated by global MIE
-    assign irq_pending = mstatus_mie_r & (
+    assign irq_pending = (mstatus_mie_r | !privilege_m_r) & (
         (mie_meie & meip) |   // External interrupt
         (mie_mtie & mtip) |   // Timer interrupt
         (mie_msie & msip)     // Software interrupt
@@ -278,7 +337,9 @@ module z_core_csr_file #(
     // =========================================================================
 
     always @(*) begin
+        csr_known = 1'b1;
         case (csr_addr)
+            12'h306: csr_read_data = mcounteren_r;
             ADDR_MSTATUS:   csr_read_data = mstatus_val;
             ADDR_MISA:      csr_read_data = misa_val;
             ADDR_MIE:       csr_read_data = mie_val;
@@ -304,24 +365,72 @@ module z_core_csr_file #(
             ADDR_INSTRET:   csr_read_data = minstret_r[31:0];
             ADDR_MINSTRETH,
             ADDR_INSTRETH:  csr_read_data = minstret_r[63:32];
-            ADDR_MHPMCOUNTER3: csr_read_data = mhpmcounter3_r[31:0];
-            ADDR_MHPMCOUNTER3H: csr_read_data = mhpmcounter3_r[63:32];
-            ADDR_MHPMCOUNTER4: csr_read_data = mhpmcounter4_r[31:0];
-            ADDR_MHPMCOUNTER4H: csr_read_data = mhpmcounter4_r[63:32];
-            ADDR_MHPMCOUNTER5: csr_read_data = mhpmcounter5_r[31:0];
-            ADDR_MHPMCOUNTER5H: csr_read_data = mhpmcounter5_r[63:32];
-            ADDR_MHPMCOUNTER6: csr_read_data = mhpmcounter6_r[31:0];
-            ADDR_MHPMCOUNTER6H: csr_read_data = mhpmcounter6_r[63:32];
-            ADDR_MHPMCOUNTER7: csr_read_data = mhpmcounter7_r[31:0];
-            ADDR_MHPMCOUNTER7H: csr_read_data = mhpmcounter7_r[63:32];
-            ADDR_MHPMCOUNTER8: csr_read_data = mhpmcounter8_r[31:0];
-            ADDR_MHPMCOUNTER8H: csr_read_data = mhpmcounter8_r[63:32];
-            ADDR_MHPMCOUNTER9: csr_read_data = mhpmcounter9_r[31:0];
-            ADDR_MHPMCOUNTER9H: csr_read_data = mhpmcounter9_r[63:32];
-            ADDR_MHPMCOUNTER10: csr_read_data = mhpmcounter10_r[31:0];
-            ADDR_MHPMCOUNTER10H: csr_read_data = mhpmcounter10_r[63:32];
+            ADDR_MHPMCOUNTER3,
+            ADDR_HPMCOUNTER3:   csr_read_data = mhpmcounter3_r[31:0];
+            ADDR_MHPMCOUNTER3H,
+            ADDR_HPMCOUNTER3H:  csr_read_data = mhpmcounter3_r[63:32];
+            ADDR_MHPMCOUNTER4,
+            ADDR_HPMCOUNTER4:   csr_read_data = mhpmcounter4_r[31:0];
+            ADDR_MHPMCOUNTER4H,
+            ADDR_HPMCOUNTER4H:  csr_read_data = mhpmcounter4_r[63:32];
+            ADDR_MHPMCOUNTER5,
+            ADDR_HPMCOUNTER5:   csr_read_data = mhpmcounter5_r[31:0];
+            ADDR_MHPMCOUNTER5H,
+            ADDR_HPMCOUNTER5H:  csr_read_data = mhpmcounter5_r[63:32];
+            ADDR_MHPMCOUNTER6,
+            ADDR_HPMCOUNTER6:   csr_read_data = mhpmcounter6_r[31:0];
+            ADDR_MHPMCOUNTER6H,
+            ADDR_HPMCOUNTER6H:  csr_read_data = mhpmcounter6_r[63:32];
+            ADDR_MHPMCOUNTER7,
+            ADDR_HPMCOUNTER7:   csr_read_data = mhpmcounter7_r[31:0];
+            ADDR_MHPMCOUNTER7H,
+            ADDR_HPMCOUNTER7H:  csr_read_data = mhpmcounter7_r[63:32];
+            ADDR_MHPMCOUNTER8,
+            ADDR_HPMCOUNTER8:   csr_read_data = mhpmcounter8_r[31:0];
+            ADDR_MHPMCOUNTER8H,
+            ADDR_HPMCOUNTER8H:  csr_read_data = mhpmcounter8_r[63:32];
+            ADDR_MHPMCOUNTER9,
+            ADDR_HPMCOUNTER9:   csr_read_data = mhpmcounter9_r[31:0];
+            ADDR_MHPMCOUNTER9H,
+            ADDR_HPMCOUNTER9H:  csr_read_data = mhpmcounter9_r[63:32];
+            ADDR_MHPMCOUNTER10,
+            ADDR_HPMCOUNTER10:  csr_read_data = mhpmcounter10_r[31:0];
+            ADDR_MHPMCOUNTER10H,
+            ADDR_HPMCOUNTER10H: csr_read_data = mhpmcounter10_r[63:32];
+            ADDR_MHPMCOUNTER11,
+            ADDR_HPMCOUNTER11:  csr_read_data = mhpmcounter11_r[31:0];
+            ADDR_MHPMCOUNTER11H,
+            ADDR_HPMCOUNTER11H: csr_read_data = mhpmcounter11_r[63:32];
+            ADDR_MHPMCOUNTER12,
+            ADDR_HPMCOUNTER12:  csr_read_data = mhpmcounter12_r[31:0];
+            ADDR_MHPMCOUNTER12H,
+            ADDR_HPMCOUNTER12H: csr_read_data = mhpmcounter12_r[63:32];
 
-            default:        csr_read_data = 32'h0;
+            12'hfc0: csr_read_data = ucycle_r[31:0];
+            12'hfe0: csr_read_data = ucycle_r[63:32];
+            12'hfc2: csr_read_data = uinstret_r[31:0];
+            12'hfe2: csr_read_data = uinstret_r[63:32];
+            12'hfc3: csr_read_data = uhpmcounter3_r[31:0];
+            12'hfe3: csr_read_data = uhpmcounter3_r[63:32];
+            12'hfc4: csr_read_data = uhpmcounter4_r[31:0];
+            12'hfe4: csr_read_data = uhpmcounter4_r[63:32];
+            12'hfc5: csr_read_data = uhpmcounter5_r[31:0];
+            12'hfe5: csr_read_data = uhpmcounter5_r[63:32];
+            12'hfc6: csr_read_data = uhpmcounter6_r[31:0];
+            12'hfe6: csr_read_data = uhpmcounter6_r[63:32];
+            12'hfc7: csr_read_data = uhpmcounter7_r[31:0];
+            12'hfe7: csr_read_data = uhpmcounter7_r[63:32];
+            12'hfc8: csr_read_data = uhpmcounter8_r[31:0];
+            12'hfe8: csr_read_data = uhpmcounter8_r[63:32];
+            12'hfc9: csr_read_data = uhpmcounter9_r[31:0];
+            12'hfe9: csr_read_data = uhpmcounter9_r[63:32];
+            12'hfca: csr_read_data = uhpmcounter10_r[31:0];
+            12'hfea: csr_read_data = uhpmcounter10_r[63:32];
+            12'hfcb: csr_read_data = uhpmcounter11_r[31:0];
+            12'hfeb: csr_read_data = uhpmcounter11_r[63:32];
+            12'hfcc: csr_read_data = uhpmcounter12_r[31:0];
+            12'hfec: csr_read_data = uhpmcounter12_r[63:32];
+            default: begin csr_read_data = 32'h0; csr_known = 1'b0; end
         endcase
     end
 
@@ -334,6 +443,9 @@ module z_core_csr_file #(
             // Reset values per RISC-V Privileged Spec
             mstatus_mie_r  <= 1'b0;
             mstatus_mpie_r <= 1'b0;
+            privilege_m_r <= 1'b1;
+            mstatus_mpp_r <= 1'b1;
+            mcounteren_r <= 32'b0;
             mie_msie       <= 1'b0;
             mie_mtie       <= 1'b0;
             mie_meie       <= 1'b0;
@@ -352,6 +464,21 @@ module z_core_csr_file #(
             mhpmcounter8_r <= 64'h0;
             mhpmcounter9_r <= 64'h0;
             mhpmcounter10_r <= 64'h0;
+            mhpmcounter11_r <= 64'h0;
+            mhpmcounter12_r <= 64'h0;
+            ucycle_r <= 64'h0;
+            uinstret_r <= 64'h0;
+            uhpmcounter3_r <= 64'h0;
+            uhpmcounter4_r <= 64'h0;
+            uhpmcounter5_r <= 64'h0;
+            uhpmcounter6_r <= 64'h0;
+            uhpmcounter7_r <= 64'h0;
+            uhpmcounter8_r <= 64'h0;
+            uhpmcounter9_r <= 64'h0;
+            uhpmcounter10_r <= 64'h0;
+            uhpmcounter11_r <= 64'h0;
+            uhpmcounter12_r <= 64'h0;
+
         end else begin
 
             // --- Always-running counters ---
@@ -374,6 +501,35 @@ module z_core_csr_file #(
                 mhpmcounter10_r <= mhpmcounter10_r + 1;
             if (inst_cache_miss_pulse)
                 mhpmcounter9_r <= mhpmcounter9_r + 1;
+            if (data_cache_miss_pulse)
+                mhpmcounter12_r <= mhpmcounter12_r + 1;
+            if (mem_uncached_pulse)
+                mhpmcounter11_r <= mhpmcounter11_r + 1;
+
+            if (counter_user_mode)
+                ucycle_r <= ucycle_r + 1;
+            if (instret_user_pulse)
+                uinstret_r <= uinstret_r + 1;
+            if ((inst_cache_hit_pulse && inst_cache_user))
+                uhpmcounter3_r <= uhpmcounter3_r + 1;
+            if ((data_cache_hit_pulse && data_access_user))
+                uhpmcounter4_r <= uhpmcounter4_r + 1;
+            if ((mem_read_pulse && data_access_user))
+                uhpmcounter5_r <= uhpmcounter5_r + 1;
+            if ((mem_write_pulse && data_access_user))
+                uhpmcounter6_r <= uhpmcounter6_r + 1;
+            if ((branch_misprediction_pulse && counter_user_mode))
+                uhpmcounter7_r <= uhpmcounter7_r + 1;
+            if ((pipeline_flush_pulse && counter_user_mode))
+                uhpmcounter8_r <= uhpmcounter8_r + 1;
+            if ((inst_cache_miss_pulse && inst_cache_user))
+                uhpmcounter9_r <= uhpmcounter9_r + 1;
+            if ((mem_inst_fetch_pulse && counter_user_mode))
+                uhpmcounter10_r <= uhpmcounter10_r + 1;
+            if ((mem_uncached_pulse && data_access_user))
+                uhpmcounter11_r <= uhpmcounter11_r + 1;
+            if ((data_cache_miss_pulse && data_access_user))
+                uhpmcounter12_r <= uhpmcounter12_r + 1;
 
             // --- Trap Entry (highest priority over CSR writes) ---
             // Per Privileged Spec §3.1.6.1:
@@ -381,8 +537,10 @@ module z_core_csr_file #(
             //   mcause  <- trap_mcause
             //   MPIE    <- MIE
             //   MIE     <- 0 (disable interrupts)
-            //   MPP     <- M (hardwired, no change needed)
+            //   MPP     <- previous privilege; current privilege <- M
             if (trap_enter) begin
+                mstatus_mpp_r <= privilege_m_r;
+                privilege_m_r <= 1'b1;
                 mepc_r         <= trap_mepc & 32'hFFFFFFFC; // Enforce alignment
                 mcause_r       <= trap_mcause;
                 mtval_r        <= trap_mtval;
@@ -394,8 +552,10 @@ module z_core_csr_file #(
             // Per Privileged Spec §3.1.6.1:
             //   MIE  <- MPIE
             //   MPIE <- 1
-            //   MPP  <- M (hardwired, no change needed)
+            //   privilege <- MPP; MPP <- U
             else if (mret_exec) begin
+                privilege_m_r <= mstatus_mpp_r;
+                mstatus_mpp_r <= 1'b0;
                 mstatus_mie_r  <= mstatus_mpie_r;
                 mstatus_mpie_r <= 1'b1;
             end
@@ -403,10 +563,11 @@ module z_core_csr_file #(
             // --- Normal CSR Write (from CSRRW/CSRRS/CSRRC) ---
             else if (csr_wen) begin
                 case (csr_addr)
+                    12'h306: mcounteren_r <= csr_write_data & 32'h00001ffd;
                     ADDR_MSTATUS: begin
                         mstatus_mie_r  <= csr_write_data[3];
                         mstatus_mpie_r <= csr_write_data[7];
-                        // MPP (bits 12:11) ignored - hardwired to M-mode
+                        mstatus_mpp_r <= (csr_write_data[12:11] == 2'b11);
                     end
                     ADDR_MIE: begin
                         mie_msie <= csr_write_data[3];
@@ -491,6 +652,18 @@ module z_core_csr_file #(
                     end
                     ADDR_MHPMCOUNTER10H: begin
                         mhpmcounter10_r[63:32] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER11: begin
+                        mhpmcounter11_r[31:0] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER11H: begin
+                        mhpmcounter11_r[63:32] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER12: begin
+                        mhpmcounter12_r[31:0] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER12H: begin
+                        mhpmcounter12_r[63:32] <= csr_write_data;
                     end
                     // default: ignore writes to unknown/read-only CSRs
                 endcase

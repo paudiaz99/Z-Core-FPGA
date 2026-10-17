@@ -39,19 +39,23 @@ module z_core_top #(
     parameter DATA_WIDTH    = 32,
     parameter ADDR_WIDTH    = 32,
     parameter STRB_WIDTH    = (DATA_WIDTH/8),
-    parameter N_GPIO        = 16,
+    parameter N_GPIO        = 15,   // was 16; the top pin (Y11) now drives host_rstn
     parameter PIPELINE_OUTPUT = 0,
-    parameter INST_CACHE_DEPTH = 8192,
+    parameter INST_CACHE_DEPTH = 4096,
     parameter DATA_CACHE_DEPTH = 4096,
     // Bootloader MIF files (byte lanes 0-3)
-    parameter INIT_FILE_0   = "software/bootloader_byte0.mif",
-    parameter INIT_FILE_1   = "software/bootloader_byte1.mif",
-    parameter INIT_FILE_2   = "software/bootloader_byte2.mif",
-    parameter INIT_FILE_3   = "software/bootloader_byte3.mif"
+    parameter INIT_FILE_0   = "software/bootloader/bootloader_byte0.mif",
+    parameter INIT_FILE_1   = "software/bootloader/bootloader_byte1.mif",
+    parameter INIT_FILE_2   = "software/bootloader/bootloader_byte2.mif",
+    parameter INIT_FILE_3   = "software/bootloader/bootloader_byte3.mif"
 )(
     // Board clock and reset
     input  wire        MAX10_CLK1_50,
     input  wire [1:0]  KEY,            // KEY[0] = active-low reset
+    input  wire        host_rstn,      // host-driven reset, active low
+                                       //   (USB-serial DTR; weak pull-up in
+                                       //    the QSF so an unconnected pin
+                                       //    never holds the CPU in reset)
 
     // LEDs
     output wire [9:0]  LEDR,
@@ -84,8 +88,80 @@ module z_core_top #(
     output wire        DRAM_WE_N
 );
 
-wire clk  = MAX10_CLK1_50;
-wire rstn = KEY[0];
+wire clk = MAX10_CLK1_50;
+
+// **************************************************
+//                     RESET
+// **************************************************
+// Two asynchronous, active-low sources:
+//   KEY[0]    - on-board push button
+//   host_rstn - driven by the host over the USB-serial adapter's DTR line,
+//               so a script can power-cycle the CPU without touching the
+//               board. Weak pull-up (see Z-Core.qsf) keeps it released when
+//               nothing is wired to it.
+//   UART break - same idea but over the existing uart_rx pin, for adapters
+//               with no spare line. See uart_break_reset.v.
+//
+// A third source, needing no pin at all: a BREAK on the UART line. The host
+// sends one with tcsendbreak() over the same cable that carries the data, so
+// a script can reset the core on a board with no spare GPIO. The detector is
+// outside the CPU, so it works even when the program has hung.
+wire uart_break_rst;
+
+uart_break_reset #(
+    .CLK_HZ   (50_000_000),
+    .BREAK_US (5000)
+) uart_break_reset_inst (
+    .clk       (clk),
+    .uart_rx   (uart_rx),
+    .break_rst (uart_break_rst)
+);
+
+// All three are asynchronous to clk, so combine them and pass the result
+// through an async-assert / sync-release synchroniser rather than using it raw.
+// host_rstn is an unconnected header pin held only by a weak internal
+// pull-up. Feeding that straight into an asynchronous reset is unsafe: a
+// glitch shorter than a clock period can reset part of the design without
+// cleanly restarting it -- corrupting state (e.g. dropping a UART byte
+// mid-transmission) with no visible reboot.
+//
+// So synchronise it and require it to be held low for HOST_RST_FILTER
+// consecutive clocks before it counts. A real resetter asserts for
+// milliseconds; noise does not.
+localparam integer HOST_RST_FILTER = 50000;   // 1 ms at 50 MHz
+
+reg  [15:0] host_rst_cnt_r;
+reg         host_rst_meta_r, host_rst_sync_r;
+reg         host_rst_qual_r;
+
+always @(posedge clk) begin
+    host_rst_meta_r <= host_rstn;
+    host_rst_sync_r <= host_rst_meta_r;
+
+    if (host_rst_sync_r) begin
+        host_rst_cnt_r  <= 16'd0;
+        host_rst_qual_r <= 1'b0;
+    end else if (host_rst_cnt_r == HOST_RST_FILTER[15:0]) begin
+        host_rst_qual_r <= 1'b1;
+    end else begin
+        host_rst_cnt_r  <= host_rst_cnt_r + 1'b1;
+    end
+end
+
+wire rstn_async = KEY[0] & ~host_rst_qual_r & ~uart_break_rst;
+
+reg rstn_meta_r, rstn_sync_r;
+always @(posedge clk or negedge rstn_async) begin
+    if (!rstn_async) begin
+        rstn_meta_r <= 1'b0;
+        rstn_sync_r <= 1'b0;
+    end else begin
+        rstn_meta_r <= 1'b1;
+        rstn_sync_r <= rstn_meta_r;
+    end
+end
+
+wire rstn = rstn_sync_r;
 
 // Heartbeat: bit 25 of a 26-bit counter at 50 MHz ≈ 0.74 Hz
 reg [25:0] heartbeat;

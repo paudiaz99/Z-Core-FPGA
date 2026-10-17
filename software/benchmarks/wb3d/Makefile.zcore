@@ -1,0 +1,53 @@
+
+PREFIX  = riscv32-unknown-elf-
+CC      = $(PREFIX)gcc
+OBJCOPY = $(PREFIX)objcopy
+OBJDUMP = $(PREFIX)objdump
+SIZE    = $(PREFIX)size
+
+LIBS_DIR = ../../libs
+
+ARCH    = -march=rv32im_zicsr -mabi=ilp32
+CFLAGS  = $(ARCH) -O3 -Wall -Wextra -ffreestanding -nostdlib -fno-common -fno-tree-loop-distribute-patterns \
+          -mstrict-align -I$(LIBS_DIR)
+LDFLAGS = -T linker_sdram.ld
+
+PIX32 ?= 1
+CFLAGS += -DPIX32=$(PIX32)
+
+VGA_BLIT ?= 1
+CFLAGS += -DVGA_BLIT=$(VGA_BLIT)
+
+SRCS = wb3d.c \
+       $(LIBS_DIR)/uart.c \
+       $(LIBS_DIR)/printf.c \
+       $(LIBS_DIR)/timer.c \
+       $(LIBS_DIR)/softint64.c \
+       $(LIBS_DIR)/crt0.S
+
+DEPS = sintab.h span_bloat.h linker_sdram.ld
+
+.PHONY: all clean
+
+all: wb3d.bin
+
+wb3d.elf: $(SRCS) $(DEPS)
+	@echo "Building wb3d (PIX32=$(PIX32) VGA_BLIT=$(VGA_BLIT))..."
+	$(CC) $(CFLAGS) $(LDFLAGS) $(SRCS) -o $@
+
+wb3d.bin: wb3d.elf
+	$(OBJCOPY) -O binary $< $@
+	@echo ""
+	$(SIZE) wb3d.elf
+	@echo ""
+	@echo "Upload:  python3 ../../../scripts/upload.py /dev/ttyUSB0 \\"
+	@echo "             wb3d.bin --base 0x10000000 --entry 0x10000000 --reset"
+
+wb3d.lst: wb3d.elf
+	$(OBJDUMP) -d -S $< > $@
+
+wb3d.s: wb3d.c $(DEPS)
+	$(CC) $(CFLAGS) -S -fverbose-asm -o $@ wb3d.c
+
+clean:
+	rm -f wb3d.elf wb3d.bin wb3d.lst wb3d.s

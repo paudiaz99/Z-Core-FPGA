@@ -29,11 +29,11 @@ SOFTWARE.
 #define VGA_FB_ADDR    (*((volatile unsigned int *)(VGA_BASE + 0x00)))
 #define VGA_FB_DATA    (*((volatile unsigned int *)(VGA_BASE + 0x04)))
 #define VGA_FB_STATUS  (*((volatile unsigned int *)(VGA_BASE + 0x08)))
+#define VGA_FB_DATA4   (*((volatile unsigned int *)(VGA_BASE + 0x0C)))
 
 #define VGA_WIDTH      320
 #define VGA_HEIGHT     200
 
-/* 8-bit color: RRRGGGBB */
 #define VGA_RGB(r,g,b) ((unsigned char)(((r)<<5)|((g)<<2)|(b)))
 
 #define VGA_BLACK      0x00
@@ -73,4 +73,4 @@ static inline void vga_wait_vsync(void) {
         ;
 }
 
-#endif /* VGA_H */
+#endif

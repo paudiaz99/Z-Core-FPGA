@@ -1,0 +1,17 @@
+config BR2_PACKAGE_ZCORE_APPS
+	bool "Z-Core Linux applications and benchmarks"
+	default y
+
+config BR2_PACKAGE_ZCORE_HTOP
+	bool "htop (static no-MMU port)"
+	select BR2_PACKAGE_NCURSES
+	default y
+
+config BR2_PACKAGE_ZCORE_LSCPU
+	bool "util-linux lscpu (static no-MMU port)"
+	default y
+
+config BR2_PACKAGE_ZCORE_VIM
+	bool "Vim tiny (no-MMU port)"
+	select BR2_PACKAGE_NCURSES
+	default y

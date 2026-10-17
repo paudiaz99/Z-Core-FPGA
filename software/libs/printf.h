@@ -1,4 +1,3 @@
-
 /*
 
 Copyright (c) 2025 Pau Díaz Cuesta
@@ -28,17 +27,7 @@ SOFTWARE.
 
 #include <stdarg.h>
 
-/* Compact formatted output over the Z-Core UART (uses uart_putc()).
- *
- * Supported conversions: %c %s %d %i %u %x %X %p %%
- * Length modifiers:       l (long), ll (long long)
- * Flags:                  '-' (left align), '0' (zero pad), '+', ' '
- * Field width:            decimal, e.g. %8u, %012llx
- *
- * No floating-point support (Z-Core has no FPU); format fixed-point
- * values yourself, e.g.  uprintf("%u.%02u", whole, frac);
- */
 int uprintf(const char *fmt, ...);
 int uvprintf(const char *fmt, va_list ap);
 
-#endif /* PRINTF_H */
+#endif

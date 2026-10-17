@@ -110,6 +110,8 @@ module axil_gpio #
     // IO Logic (Tri-state)
     // =========================================================================
     // If bit i is Output (dir=1), drive switch. If Input (dir=0), Float (z).
+    integer bit_i;   // write-decode loop; unrolls at elaboration
+
     genvar i;
     generate
         for (i = 0; i < N_GPIO; i = i + 1) begin : gpio_io_buffers
@@ -163,35 +165,37 @@ module axil_gpio #
                 // Decode Address
                 // 0x00: Data Low, 0x04: Data High
                 // 0x08: Dir Low,  0x0C: Dir High
-                
+                //
+                // Per-bit loops rather than byte-lane part-selects. The bounds
+                // are parameter constants, so this unrolls at elaboration and
+                // stays in range for any N_GPIO.
+                //
+                // The previous form,
+                //     gpio_data_out[15:8 < N_GPIO ? 15:8] <= axi_wdata[15:8];
+                // parsed as [15 : (8 < N_GPIO ? 15 : 8)], i.e. [15:15] -- an
+                // 8-bit value assigned to a 1-bit slice, so bits 14:8 were
+                // never written. It also went out of range the moment
+                // N_GPIO dropped below 16.
                 case (axi_awaddr[3:2])
                     2'b00: begin // 0x00: DATA[31:0]
-                        if (axi_wstrb[0] && N_GPIO > 0)  gpio_data_out[7:0 < N_GPIO ? 7:0]   <= axi_wdata[7:0];
-                        if (axi_wstrb[1] && N_GPIO > 8)  gpio_data_out[15:8 < N_GPIO ? 15:8]  <= axi_wdata[15:8];
-                        if (axi_wstrb[2] && N_GPIO > 16) gpio_data_out[23:16 < N_GPIO ? 23:16] <= axi_wdata[23:16];
-                        if (axi_wstrb[3] && N_GPIO > 24) gpio_data_out[31:24 < N_GPIO ? 31:24] <= axi_wdata[31:24];
+                        for (bit_i = 0; bit_i < N_GPIO && bit_i < 32; bit_i = bit_i + 1)
+                            if (axi_wstrb[bit_i >> 3])
+                                gpio_data_out[bit_i] <= axi_wdata[bit_i];
                     end
                     2'b01: begin // 0x04: DATA[63:32]
-                         if (N_GPIO > 32) begin
-                            if (axi_wstrb[0]) if(N_GPIO>32) gpio_data_out[39:32] <= axi_wdata[7:0];
-                            if (axi_wstrb[1]) if(N_GPIO>40) gpio_data_out[47:40] <= axi_wdata[15:8];
-                            if (axi_wstrb[2]) if(N_GPIO>48) gpio_data_out[55:48] <= axi_wdata[23:16];
-                            if (axi_wstrb[3]) if(N_GPIO>56) gpio_data_out[63:56] <= axi_wdata[31:24];
-                        end
+                        for (bit_i = 32; bit_i < N_GPIO && bit_i < 64; bit_i = bit_i + 1)
+                            if (axi_wstrb[(bit_i - 32) >> 3])
+                                gpio_data_out[bit_i] <= axi_wdata[bit_i - 32];
                     end
                     2'b10: begin // 0x08: DIR[31:0]
-                        if (axi_wstrb[0] && N_GPIO > 0)  gpio_dir[7:0 < N_GPIO ? 7:0]   <= axi_wdata[7:0];
-                        if (axi_wstrb[1] && N_GPIO > 8)  gpio_dir[15:8 < N_GPIO ? 15:8]  <= axi_wdata[15:8];
-                        if (axi_wstrb[2] && N_GPIO > 16) gpio_dir[23:16 < N_GPIO ? 23:16] <= axi_wdata[23:16];
-                        if (axi_wstrb[3] && N_GPIO > 24) gpio_dir[31:24 < N_GPIO ? 31:24] <= axi_wdata[31:24];
+                        for (bit_i = 0; bit_i < N_GPIO && bit_i < 32; bit_i = bit_i + 1)
+                            if (axi_wstrb[bit_i >> 3])
+                                gpio_dir[bit_i] <= axi_wdata[bit_i];
                     end
                     2'b11: begin // 0x0C: DIR[63:32]
-                        if (N_GPIO > 32) begin
-                            if (axi_wstrb[0]) if(N_GPIO>32) gpio_dir[39:32] <= axi_wdata[7:0];
-                            if (axi_wstrb[1]) if(N_GPIO>40) gpio_dir[47:40] <= axi_wdata[15:8];
-                            if (axi_wstrb[2]) if(N_GPIO>48) gpio_dir[55:48] <= axi_wdata[23:16];
-                            if (axi_wstrb[3]) if(N_GPIO>56) gpio_dir[63:56] <= axi_wdata[31:24];
-                        end
+                        for (bit_i = 32; bit_i < N_GPIO && bit_i < 64; bit_i = bit_i + 1)
+                            if (axi_wstrb[(bit_i - 32) >> 3])
+                                gpio_dir[bit_i] <= axi_wdata[bit_i - 32];
                     end
                 endcase
 

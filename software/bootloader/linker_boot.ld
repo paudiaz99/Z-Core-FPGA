@@ -3,7 +3,6 @@ ENTRY(_start)
 
 MEMORY
 {
-    /* Bootloader occupies the first 4 KB of 16 KB RAM */
     BOOT (rwx) : ORIGIN = 0x00000000, LENGTH = 4K
 }
 

@@ -22,12 +22,28 @@ SOFTWARE.
 
 */
 
+/*
+ * softint64.c — 64-bit integer divide/modulo helpers, compiled in the
+ * target's own (soft-float ilp32) ABI.
+ *
+ * Why this exists: the installed riscv32-unknown-elf toolchain is built
+ * --with-arch=rv32gc --with-abi=ilp32d (hard float) and ships no soft-float
+ * multilib, so its libgcc.a cannot be linked against our soft-float
+ * (-mabi=ilp32) objects ("can't link double-float modules with soft-float
+ * modules"). Pure 32-bit integer code never needs libgcc (the M extension
+ * inlines mul/div/rem), but any 64-bit division emits a call to __udivdi3 /
+ * __umoddi3. Providing them here lets us use 64-bit math while linking with
+ * -nostdlib and no -lgcc.
+ *
+ * 32/64-bit multiply and variable shifts are inlined by GCC (M extension),
+ * so only the division helpers are required.
+ */
+
 typedef unsigned long long u64;
 
 u64 __udivmoddi4(u64 n, u64 d, u64 *rem)
 {
     u64 q = 0, r = 0;
-    /* Restoring binary long division, MSB first. */
     for (int i = 63; i >= 0; i--) {
         r = (r << 1) | ((n >> i) & 1ULL);
         if (r >= d) {

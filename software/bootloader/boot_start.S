@@ -5,9 +5,6 @@ _start:
     lui sp, %hi(_stack_top)
     addi sp, sp, %lo(_stack_top)
 
-    /* Install trap vector (direct mode) so an unhandled exception in the
-       uploaded app reports its cause instead of silently jumping to 0x0
-       (mtvec resets to 0 = bootloader entry, which looked like a "reboot"). */
     la t0, trap_entry
     csrw mtvec, t0
 
@@ -25,8 +22,6 @@ _start:
 _loop:
     j _loop
 
-/* Trap entry: report cause/epc/tval and halt (no mret). Registers may be
-   clobbered freely since we never return to the faulting context. */
     .align 2
     .global trap_entry
 trap_entry:
